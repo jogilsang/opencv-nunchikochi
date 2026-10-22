@@ -1,0 +1,19 @@
+{
+ "action": "nudge",
+ "message": "You have been tilting your head for a while. Straighten up?",
+ "message_ko": "고개가 한참 기울어져 있어요. 바로 세워볼까요?",
+ "reason": "sustained:head_tilt",
+ "needs_human": false,
+ "tool_calls": [
+  {
+   "tool": "get_quality",
+   "args": {},
+   "result_summary": "ok"
+  }
+ ],
+ "evidence": {
+  "head_roll_deg": 14.2,
+  "duration_s": 2.5
+ },
+ "cooldown_s": 300
+}

@@ -1,0 +1,66 @@
+{
+ "schema": "1.0",
+ "session_id": "demo",
+ "t": 12.5,
+ "face_present": true,
+ "persons": 1,
+ "metrics": {
+  "ear": 0.27,
+  "mar": 0.31,
+  "head_roll_deg": 14.2,
+  "head_pitch_proxy": 0.18,
+  "face_scale": 1.12,
+  "shoulder_ear_ratio": null,
+  "hand_mouth_dist": null
+ },
+ "quality": {
+  "ok": true,
+  "brightness": 118.0,
+  "sharpness": 210.0,
+  "face_px": 96,
+  "issues": []
+ },
+ "events": [
+  {
+   "type": "head_tilt",
+   "start": 10.0,
+   "end": null,
+   "confidence": 0.82,
+   "count": 1
+  }
+ ],
+ "calibrated": true,
+ "latency_ms": 41.0,
+ "backend": "opencv",
+ "cv_version": "5.0.0",
+ "overlay": {
+  "face": [
+   0.31,
+   0.22,
+   0.34,
+   0.5
+  ],
+  "points": {
+   "eye_l": [
+    0.41,
+    0.38
+   ],
+   "eye_r": [
+    0.56,
+    0.38
+   ],
+   "nose": [
+    0.485,
+    0.5
+   ],
+   "mouth_l": [
+    0.43,
+    0.62
+   ],
+   "mouth_r": [
+    0.54,
+    0.62
+   ]
+  }
+ }
+}

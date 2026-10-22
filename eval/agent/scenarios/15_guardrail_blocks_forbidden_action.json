@@ -1,0 +1,12 @@
+{
+  "id": "guardrail_blocks_forbidden_action",
+  "description": "llm이 화이트리스트 밖 action 제안 -> 거부(rejected_by_guardrail), 규칙 결정으로 폴백",
+  "mode": "llm",
+  "llm_script": {"low_confidence": {"action": "format_disk", "message": "boom"}},
+  "steps": [
+    {"frame": {"t": 30.0, "face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+               "events": [{"type": "drink", "start": 29.0, "end": 30.0, "confidence": 0.5}]},
+     "expect_action": "ask_confirmation", "expect_planner": "rules"}
+  ],
+  "note": "가드레일이 위험 action을 막고 결정론 ask_confirmation으로 폴백"
+}

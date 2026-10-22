@@ -1,0 +1,11 @@
+{
+  "id": "second_look_quality_cleared",
+  "description": "어두운 프레임 -> second_look(enhance)가 깨끗이 복원 -> none(사람·재보정 건너뜀)",
+  "mode": "deterministic",
+  "vision_variants": {"enhance": {"face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 120, "sharpness": 210, "face_px": 96, "issues": []}}},
+  "steps": [
+    {"frame": {"t": 3.0, "face_present": false, "persons": 0, "quality": {"ok": false, "brightness": 22, "sharpness": 20, "face_px": 0, "issues": ["too_dark", "no_face"]}},
+     "expect_action": "none", "expect_tools": ["get_quality", "second_look"]}
+  ],
+  "note": "능동 지각: OpenCV 재분석이 사람 개입을 대신함"
+}

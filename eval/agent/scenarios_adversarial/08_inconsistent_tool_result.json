@@ -1,0 +1,17 @@
+{
+  "id": "adv_inconsistent_tool_result",
+  "category": "out-of-order-tool-result",
+  "description": "second_look(enhance)이 before와 모순되는(여전히 얼굴 없음) 결과를 돌려줌 -> 해소로 오인하지 않고 재보정 요청",
+  "mode": "deterministic",
+  "vision_variants": {
+    "enhance": {"t": 40.0, "face_present": false, "persons": 0,
+                "quality": {"ok": false, "brightness": 20, "sharpness": 50, "face_px": 0, "issues": ["too_dark", "no_face"]}}
+  },
+  "steps": [
+    {"frame": {"t": 40.0, "face_present": false, "persons": 1, "quality": {"ok": false, "brightness": 22, "sharpness": 55, "face_px": 0, "issues": ["too_dark"]}},
+     "expect_action": "request_recalibration",
+     "expect_tools": ["get_quality", "second_look", "request_recalibration"]}
+  ],
+  "expect": "품질 불량 -> second_look(enhance). 재분석이 여전히 불량이라 resolved=false. 사람/재보정 폴백(request_recalibration). 모순 결과를 '해소'로 믿지 않음.",
+  "note": "적대: 순서가 뒤바뀐/모순된 도구 결과"
+}

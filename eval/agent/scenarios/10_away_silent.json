@@ -1,0 +1,10 @@
+{
+  "id": "away_silent",
+  "description": "자리비움(얼굴 없음, 품질 정상) -> suppress_focus(away), 조용히",
+  "mode": "deterministic",
+  "steps": [
+    {"frame": {"t": 50.0, "face_present": false, "persons": 0, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 0, "issues": []}},
+     "expect_action": "suppress_focus", "expect_tools": ["suppress"]}
+  ],
+  "note": "자리비움엔 아무 메시지도 보내지 않음"
+}

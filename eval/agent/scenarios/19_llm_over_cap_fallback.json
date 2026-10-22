@@ -1,0 +1,16 @@
+{
+  "id": "llm_over_cap_fallback",
+  "description": "세션 LLM 호출 상한 초과 -> 애매한 순간이어도 규칙 경로",
+  "mode": "llm",
+  "config": {"llm_max_calls": 1},
+  "llm_script": {"low_confidence": {"action": "none", "reason": "llm:ok"}},
+  "steps": [
+    {"frame": {"t": 30.0, "face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+               "events": [{"type": "drink", "start": 29.0, "end": 30.0, "confidence": 0.5}]},
+     "expect_planner": "llm", "confirm": false},
+    {"frame": {"t": 90.0, "face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+               "events": [{"type": "yawn", "start": 89.0, "end": 90.0, "confidence": 0.5}]},
+     "expect_action": "ask_confirmation", "expect_planner": "rules"}
+  ],
+  "note": "비용 상한: 초과 시 규칙 폴백"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "quality_recalibration",
+  "description": "어두움+no_face, second_look 미해소 -> request_recalibration",
+  "mode": "deterministic",
+  "vision_variants": {"enhance": {"face_present": false, "persons": 0, "quality": {"ok": false, "brightness": 24, "sharpness": 30, "face_px": 0, "issues": ["too_dark", "no_face"]}}},
+  "steps": [
+    {"frame": {"t": 3.0, "face_present": false, "persons": 0, "quality": {"ok": false, "brightness": 22, "sharpness": 20, "face_px": 0, "issues": ["too_dark", "no_face"]}},
+     "expect_action": "request_recalibration", "expect_tools": ["get_quality", "second_look", "request_recalibration"]}
+  ],
+  "note": "재분석해도 여전히 나쁘면 재보정 요청으로 폴백"
+}

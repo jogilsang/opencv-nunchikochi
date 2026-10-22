@@ -1,0 +1,182 @@
+{
+ "title": "Nunchikochi - AWS Architecture",
+ "subtitle": "Browser webcam -> OpenCV 5 on Lambda arm64 (Graviton) -> Agent -> Nudge. Frames are never stored.",
+ "layout": [
+  {
+   "dir": "col",
+   "children": [
+    {
+     "id": "user",
+     "icon": "users",
+     "label": "User browser\n(webcam, 320x240 JPEG)"
+    }
+   ]
+  },
+  {
+   "group": "aws-cloud",
+   "label": "AWS Cloud",
+   "children": [
+    {
+     "group": "region",
+     "label": "Region (us-east-1)",
+     "dir": "row",
+     "children": [
+      {
+       "group": "generic",
+       "label": "Delivery",
+       "dir": "col",
+       "children": [
+        {
+         "id": "cf",
+         "icon": "cloudfront",
+         "label": "CloudFront"
+        },
+        {
+         "id": "s3",
+         "icon": "s3",
+         "label": "S3\n(static web)"
+        },
+        {
+         "id": "apigw",
+         "icon": "apigw",
+         "label": "API Gateway\n(HTTP API)"
+        }
+       ]
+      },
+      {
+       "group": "generic",
+       "label": "Compute (arm64 / Graviton)",
+       "dir": "col",
+       "children": [
+        {
+         "id": "lambda",
+         "icon": "lambda",
+         "label": "Lambda\nOpenCV 5 + Agent"
+        }
+       ]
+      },
+      {
+       "group": "generic",
+       "label": "State / AI / Ops",
+       "dir": "col",
+       "children": [
+        {
+         "id": "ssm",
+         "icon": "systems manager",
+         "label": "SSM Parameter\n(API key)"
+        },
+        {
+         "id": "ddb",
+         "icon": "dynamodb",
+         "label": "DynamoDB\n(aggregates only)"
+        },
+        {
+         "id": "bedrock",
+         "icon": "bedrock",
+         "label": "Bedrock\n(Claude Haiku)"
+        },
+        {
+         "id": "cw",
+         "icon": "cloudwatch",
+         "label": "CloudWatch\n(EMF metrics)"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "edges": [
+  {
+   "from": "user",
+   "to": "cf",
+   "step": 1,
+   "label": "load web app"
+  },
+  {
+   "from": "cf",
+   "to": "s3",
+   "step": 1,
+   "style": "secondary"
+  },
+  {
+   "from": "user",
+   "to": "apigw",
+   "step": 2,
+   "label": "JPEG <=2fps"
+  },
+  {
+   "from": "apigw",
+   "to": "lambda",
+   "step": 2
+  },
+  {
+   "from": "lambda",
+   "to": "ssm",
+   "step": 3,
+   "style": "mgmt",
+   "label": "key"
+  },
+  {
+   "from": "lambda",
+   "to": "ddb",
+   "step": 4,
+   "style": "data",
+   "label": "state"
+  },
+  {
+   "from": "lambda",
+   "to": "bedrock",
+   "step": 5,
+   "style": "secondary",
+   "label": "LLM"
+  },
+  {
+   "from": "lambda",
+   "to": "cw",
+   "step": 6,
+   "style": "alert",
+   "label": "metrics"
+  }
+ ],
+ "legend": {
+  "primary": "Request path",
+  "secondary": "Service call",
+  "mgmt": "Secret lookup",
+  "data": "State",
+  "alert": "Telemetry"
+ },
+ "steps": [
+  {
+   "no": 1,
+   "title": "Web delivery",
+   "desc": "The static web app is served from S3 through CloudFront."
+  },
+  {
+   "no": 2,
+   "title": "Frame in",
+   "desc": "The browser sends a small JPEG about twice a second with the access key. Lambda decodes it in memory."
+  },
+  {
+   "no": 3,
+   "title": "Key check",
+   "desc": "The access key is verified against an SSM SecureString; requests fail closed."
+  },
+  {
+   "no": 4,
+   "title": "Session state",
+   "desc": "Only aggregates and filter state (<=8KB) go to DynamoDB with a 24h TTL. Frames are discarded after the response."
+  },
+  {
+   "no": 5,
+   "title": "Agent LLM",
+   "desc": "A rules agent decides first; Bedrock Claude is optional, time-boxed, and guardrailed with rule fallback."
+  },
+  {
+   "no": 6,
+   "title": "Telemetry",
+   "desc": "Latency, decision counts and errors are emitted as EMF metrics. No image data is ever logged."
+  }
+ ]
+}

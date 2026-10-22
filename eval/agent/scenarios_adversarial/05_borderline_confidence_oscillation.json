@@ -1,0 +1,20 @@
+{
+  "id": "adv_borderline_confidence_oscillation",
+  "category": "borderline-oscillation",
+  "description": "확신이 경계(0.5 근처)에서 빠르게 진동 -> 한 번만 사람에게 묻고, 보류 중에는 재질문 폭주하지 않음",
+  "mode": "deterministic",
+  "config": {"second_look_enabled": false},
+  "steps": [
+    {"frame": {"t": 30.0, "face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+               "events": [{"type": "drink", "start": 29.5, "end": 30.0, "confidence": 0.50}]},
+     "expect_action": "ask_confirmation"},
+    {"frame": {"t": 31.0, "face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+               "events": [{"type": "drink", "start": 30.5, "end": 31.0, "confidence": 0.58}]},
+     "expect_action": "none"},
+    {"frame": {"t": 32.0, "face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+               "events": [{"type": "drink", "start": 31.5, "end": 32.0, "confidence": 0.49}]},
+     "expect_action": "none"}
+  ],
+  "expect": "첫 경곗값에서 ask_confirmation(pending 설정), 이후 진동 프레임은 pending 중이라 재질문하지 않고 none.",
+  "note": "적대: 빠르게 반복되는 경계값 진동"
+}

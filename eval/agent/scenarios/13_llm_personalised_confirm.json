@@ -1,0 +1,15 @@
+{
+  "id": "llm_personalised_confirm",
+  "description": "llm 모드: 저확신 moment에 LLM이 개인화된 확인 문구 -> planner=llm",
+  "mode": "llm",
+  "llm_script": {"low_confidence": {"action": "ask_confirmation",
+                                    "message": "Did you just take a sip of water?",
+                                    "message_ko": "방금 물 한 모금 드셨나요?",
+                                    "reason": "llm:drink_personalised"}},
+  "steps": [
+    {"frame": {"t": 30.0, "face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+               "events": [{"type": "drink", "start": 29.0, "end": 30.0, "confidence": 0.5}]},
+     "expect_action": "ask_confirmation", "expect_planner": "llm"}
+  ],
+  "note": "LLM은 애매한 순간에만, 같은 가드레일 통과"
+}

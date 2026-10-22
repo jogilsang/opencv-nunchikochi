@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+models/*.onnx
+models/*.bin
+eval/clips/
+eval/_cache/
+*.log
+.DS_Store
+node_modules/
+cloud/build/
+web/config.json
+docs/video/recordings/

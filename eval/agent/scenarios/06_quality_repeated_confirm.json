@@ -1,0 +1,15 @@
+{
+  "id": "quality_repeated_confirm",
+  "description": "품질 불량 3연속 -> ask_confirmation(사람 개입)",
+  "mode": "deterministic",
+  "vision_variants": {"enhance": {"face_present": false, "persons": 0, "quality": {"ok": false, "brightness": 24, "sharpness": 25, "face_px": 0, "issues": ["too_dark", "no_face"]}}},
+  "steps": [
+    {"frame": {"t": 1.0, "face_present": false, "persons": 0, "quality": {"ok": false, "brightness": 22, "sharpness": 20, "face_px": 0, "issues": ["too_dark", "no_face"]}},
+     "expect_action": "request_recalibration"},
+    {"frame": {"t": 2.0, "face_present": false, "persons": 0, "quality": {"ok": false, "brightness": 23, "sharpness": 20, "face_px": 0, "issues": ["too_dark", "no_face"]}},
+     "expect_action": "request_recalibration"},
+    {"frame": {"t": 3.0, "face_present": false, "persons": 0, "quality": {"ok": false, "brightness": 23, "sharpness": 20, "face_px": 0, "issues": ["too_dark", "no_face"]}},
+     "expect_action": "ask_confirmation", "expect_tools": ["get_quality", "ask_confirmation"]}
+  ],
+  "note": "반복 불량은 사람에게 확인(HITL)"
+}

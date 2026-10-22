@@ -1,0 +1,19 @@
+{
+ "session_id": "demo",
+ "date": "2026-10-22",
+ "duration_s": 3600,
+ "counts": {
+  "blink": 950,
+  "head_tilt": 12
+ },
+ "seconds": {
+  "forward_head": 840.0
+ },
+ "longest_s": {
+  "forward_head": 310.0
+ },
+ "nudges_sent": 4,
+ "nudges_suppressed": 7,
+ "confirmations_asked": 0,
+ "recalibrations": 0
+}

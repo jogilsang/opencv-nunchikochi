@@ -1,0 +1,16 @@
+{
+  "id": "denied_confirmation_raises_threshold",
+  "description": "저확신 drink 확인요청 -> 사람이 부정 -> 임계 상향, 다음 같은 경곗값은 안 물음",
+  "mode": "deterministic",
+  "vision_variants": {"zoom_face": {"face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+                                     "events": [{"type": "drink", "start": 29.0, "end": 30.0, "confidence": 0.5}]}},
+  "steps": [
+    {"frame": {"t": 30.0, "face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+               "events": [{"type": "drink", "start": 29.0, "end": 30.0, "confidence": 0.5}]},
+     "expect_action": "ask_confirmation", "confirm": false},
+    {"frame": {"t": 90.0, "face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+               "events": [{"type": "drink", "start": 89.0, "end": 90.0, "confidence": 0.5}]},
+     "expect_action": "none"}
+  ],
+  "note": "사람 부정 피드백이 오탐 임계를 올림"
+}

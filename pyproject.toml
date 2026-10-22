@@ -1,0 +1,35 @@
+[project]
+name = "nunchikochi"
+version = "0.1.0"
+description = "Nunchikochi: OpenCV 5 + AWS Agentic Vision (OpenCV AI Competition 2026)"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "opencv-python-headless==5.0.0.93",
+  "numpy>=1.26,<3",
+]
+
+# Each component edits ONLY its own group (docs/RULES.md). Pin exact versions when you add a dependency.
+[dependency-groups]
+vision  = []
+agent   = ["strands-agents", "boto3"]
+service = [
+  "fastapi==0.159.1",
+  "uvicorn==0.54.0",
+  "python-multipart==0.0.32",
+  "boto3==1.43.117",
+  "mangum==0.22.0",
+  "httpx==0.28.1",   # service test client (TestClient)
+  "moto==5.2.4",     # mock DynamoDB in tests/service
+]
+dev     = ["pytest", "ruff"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nunchi"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

@@ -1,0 +1,13 @@
+{
+  "id": "adv_conflicting_away_and_posture",
+  "category": "conflicting-signals",
+  "description": "얼굴 없음(자리비움)인데 forward_head 이벤트가 동시에 보고됨(상충) -> 얼굴 없으면 자세 신호를 믿지 않고 조용히",
+  "mode": "deterministic",
+  "steps": [
+    {"frame": {"t": 200.0, "face_present": false, "persons": 0, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 0},
+               "events": [{"type": "forward_head", "start": 10.0, "end": null, "confidence": 0.9}]},
+     "expect_action": "suppress_focus"}
+  ],
+  "expect": "away(persons=0,face 없음,quality ok)가 우선. 유령 forward_head로 넛지하지 않음. reason=away.",
+  "note": "적대: 동시에 상충하는 신호(자리비움 + 거북목)"
+}

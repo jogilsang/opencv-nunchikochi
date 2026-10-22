@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>Nunchikochi — calm desk coach</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="dot" aria-hidden="true">●</span> <span data-i18n="appName">Nunchikochi</span></div>
+    <span id="mock-badge" class="mock-badge" hidden data-i18n="mockBadge">MOCK MODE</span>
+    <span id="demo-badge" class="mock-badge demo" hidden data-i18n="demoBadge">DEMO</span>
+    <div class="spacer"></div>
+    <button id="btn-privacy" class="link-btn" type="button" data-i18n="privacyLink"></button>
+    <div class="lang-toggle" role="group" aria-label="Language">
+      <button id="lang-en" class="active" type="button">EN</button>
+      <button id="lang-ko" type="button">한국어</button>
+    </div>
+  </header>
+
+  <!-- Persistent demo marker — always visible so playback is never mistaken for a real measurement. -->
+  <div id="demo-corner" class="demo-corner" hidden><span data-i18n="demoCorner"></span></div>
+
+  <main>
+    <!-- 1. START -->
+    <section id="screen-start" class="screen active">
+      <div class="card">
+        <h1 data-i18n="appName">Nunchikochi</h1>
+        <p class="tagline" data-i18n="tagline"></p>
+
+        <!-- mode select (W6): Demo (no camera) vs Live (your camera) -->
+        <h2 data-i18n="modeTitle"></h2>
+        <div class="mode-group" role="radiogroup" aria-label="Mode">
+          <button type="button" class="mode-card" id="mode-demo" role="radio" aria-checked="false">
+            <span class="mode-name" data-i18n="modeDemoName"></span>
+            <span class="mode-desc" data-i18n="modeDemoDesc"></span>
+          </button>
+          <button type="button" class="mode-card" id="mode-live" role="radio" aria-checked="false">
+            <span class="mode-name" data-i18n="modeLiveName"></span>
+            <span class="mode-desc" data-i18n="modeLiveDesc"></span>
+          </button>
+        </div>
+
+        <!-- live-only: access key (memory only) + service status -->
+        <div class="live-panel" id="live-panel" hidden>
+          <label class="field">
+            <span class="field-label" data-i18n="liveKeyLabel"></span>
+            <input type="password" id="live-key" autocomplete="off" autocapitalize="off"
+                   autocorrect="off" spellcheck="false" name="nunchi-access-key" />
+          </label>
+          <p class="field-hint" data-i18n="liveKeyHint"></p>
+          <p class="live-status" id="live-status" role="status" aria-live="polite"></p>
+        </div>
+
+        <h2 data-i18n="consentTitle"></h2>
+        <p class="lead" data-i18n="privacyLead"></p>
+        <ul class="privacy" id="privacy-points"></ul>
+        <label class="consent">
+          <input type="checkbox" id="consent" />
+          <span data-i18n="consentCheck"></span>
+        </label>
+        <div class="btn-row">
+          <button class="btn" id="btn-start" type="button" disabled data-i18n="start"></button>
+        </div>
+        <p class="start-hint" id="start-hint" role="status" aria-live="polite"></p>
+      </div>
+    </section>
+
+    <!-- 2. ERROR (camera + network/http/session) -->
+    <section id="screen-camerror" class="screen">
+      <div class="card" role="alertdialog" aria-labelledby="camerr-title" aria-describedby="camerr-body">
+        <div class="state-icon" aria-hidden="true">🎥</div>
+        <h2 class="err-title" id="camerr-title"></h2>
+        <p class="tagline" id="camerr-body"></p>
+        <div class="btn-row">
+          <button class="btn secondary" id="btn-retry" type="button" data-i18n="retry"></button>
+          <button class="btn ghost" id="btn-tomock" type="button" data-i18n="tryMock"></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. CALIBRATE -->
+    <section id="screen-calibrate" class="screen">
+      <div class="card">
+        <h2 data-i18n="calibTitle"></h2>
+        <div class="calib-wrap">
+          <div class="preview">
+            <canvas id="calib-canvas" class="mirror" width="320" height="240"></canvas>
+            <div class="cam-badge"><span class="led"></span><span data-i18n="cameraOn"></span></div>
+          </div>
+          <div class="countdown" id="calib-count">5</div>
+          <div class="progress"><span id="calib-progress"></span></div>
+          <p class="tagline" data-i18n="calibHint"></p>
+          <p class="discard-note" data-i18n="discardNote"></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. RUN -->
+    <section id="screen-run" class="screen">
+      <div class="quality-banner" id="quality-banner" role="status" aria-live="polite"></div>
+      <div class="temp-error" id="temp-error" data-i18n="tempError" role="status" aria-live="polite"></div>
+      <div class="card">
+        <div class="run-grid">
+          <div>
+            <div class="preview">
+              <canvas id="run-canvas" class="mirror layer" width="320" height="240" aria-hidden="true"></canvas>
+              <canvas id="run-overlay" class="overlay layer" width="320" height="240" aria-hidden="true"></canvas>
+              <div class="cam-badge"><span class="led" aria-hidden="true"></span><span data-i18n="cameraOn"></span></div>
+              <span id="dev-stats" class="dev-stats" hidden></span>
+            </div>
+            <div class="overlay-row">
+              <label class="switch" for="overlay-toggle">
+                <input type="checkbox" id="overlay-toggle" checked />
+                <span id="overlay-label" data-i18n="showOverlay"></span>
+              </label>
+            </div>
+            <p class="overlay-hint" data-i18n="overlayHint"></p>
+            <p class="discard-note" data-i18n="discardNote"></p>
+            <div class="btn-row" style="margin-top:12px">
+              <button class="btn secondary" id="btn-end" type="button" data-i18n="endSession"></button>
+              <button class="btn ghost" id="btn-agent" type="button" aria-expanded="false" aria-controls="agent-panel" data-i18n="agentOpen"></button>
+            </div>
+          </div>
+          <div>
+            <div class="metrics">
+              <div class="metric na" id="m-ear">
+                <div class="label" data-i18n="metricEar"></div>
+                <div class="value">—</div>
+                <div class="bar"><span></span></div>
+              </div>
+              <div class="metric na" id="m-roll">
+                <div class="label" data-i18n="metricRoll"></div>
+                <div class="value">—</div>
+                <div class="bar"><span></span></div>
+              </div>
+              <div class="metric na" id="m-scale">
+                <div class="label" data-i18n="metricScale"></div>
+                <div class="value">—</div>
+                <div class="bar"><span></span></div>
+              </div>
+            </div>
+            <div class="label" style="color:var(--muted);font-size:12px;margin-top:16px;text-transform:uppercase" data-i18n="recentEvents"></div>
+            <div class="chips" id="event-chips"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Agent activity panel: evidence of the perceive-decide-act loop -->
+      <aside id="agent-panel" class="agent-panel" hidden aria-label="Agent activity">
+        <div class="agent-head">
+          <div>
+            <h2 class="agent-title" data-i18n="agentTitle"></h2>
+            <p class="agent-hint" data-i18n="agentHint"></p>
+          </div>
+          <button class="icon-btn" id="btn-agent-close" type="button" aria-label="Close">✕</button>
+        </div>
+        <label class="switch agent-filter" for="agent-showall">
+          <input type="checkbox" id="agent-showall" />
+          <span data-i18n="agentShowAll"></span>
+        </label>
+        <ol class="agent-log" id="agent-log" aria-live="polite"></ol>
+        <p class="agent-empty" id="agent-empty" data-i18n="agentEmpty"></p>
+      </aside>
+    </section>
+
+    <!-- 5. REPORT -->
+    <section id="screen-report" class="screen">
+      <div class="card">
+        <h2 data-i18n="reportTitle"></h2>
+        <div class="cards" id="report-cards"></div>
+        <div class="report-text" id="report-text"></div>
+
+        <h3 class="sub" data-i18n="highlightsTitle"></h3>
+        <ul class="highlights" id="report-highlights"></ul>
+
+        <h3 class="sub" data-i18n="compareTitle"></h3>
+        <div id="report-compare" class="compare"></div>
+        <p class="compare-note" data-i18n="compareNote"></p>
+
+        <h3 class="sub" data-i18n="breakdownTitle"></h3>
+        <div class="table-wrap">
+          <table class="breakdown" id="report-breakdown">
+            <thead>
+              <tr>
+                <th data-i18n="colBehavior"></th>
+                <th data-i18n="colCount"></th>
+                <th data-i18n="colSeconds"></th>
+                <th data-i18n="colLongest"></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="btn-row" style="margin-top:18px">
+          <button class="btn" id="btn-new" type="button" data-i18n="newSession"></button>
+          <button class="btn secondary" id="btn-download" type="button" data-i18n="downloadCard"></button>
+          <button class="btn ghost" id="btn-copy" type="button" data-i18n="copyCard"></button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast-host" id="toast-host" role="region" aria-label="Alerts"></div>
+
+  <!-- Privacy modal -->
+  <div id="privacy-modal" class="modal-backdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="privacy-title">
+      <div class="modal-head">
+        <h2 id="privacy-title" data-i18n="privacyTitle"></h2>
+        <button class="icon-btn" id="btn-privacy-close" type="button" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <h3 class="sub" data-i18n="privacySent"></h3>
+        <p data-i18n="privacySentBody"></p>
+        <h3 class="sub" data-i18n="privacyServer"></h3>
+        <p data-i18n="privacyServerBody"></p>
+        <h3 class="sub" data-i18n="privacyStored"></h3>
+        <p data-i18n="privacyStoredBody"></p>
+        <p class="note" data-i18n="privacyNotDiag"></p>
+        <div class="btn-row" style="margin-top:14px">
+          <button class="btn secondary" id="btn-privacy-delete" type="button" data-i18n="privacyDelete"></button>
+        </div>
+        <p class="note" data-i18n="privacyDeleteNote"></p>
+      </div>
+    </div>
+  </div>
+
+  <footer><span data-i18n="discardNote"></span></footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

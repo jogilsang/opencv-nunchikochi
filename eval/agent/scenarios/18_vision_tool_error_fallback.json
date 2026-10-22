@@ -1,0 +1,11 @@
+{
+  "id": "vision_tool_error_fallback",
+  "description": "second_look(vision.analyze_variant)이 예외 -> 결정 루프 밖으로 안 새고 재보정 폴백",
+  "mode": "deterministic",
+  "vision_raises": true,
+  "steps": [
+    {"frame": {"t": 3.0, "face_present": false, "persons": 0, "quality": {"ok": false, "brightness": 22, "sharpness": 20, "face_px": 0, "issues": ["too_dark", "no_face"]}},
+     "expect_action": "request_recalibration", "expect_tools": ["get_quality", "second_look", "request_recalibration"]}
+  ],
+  "note": "도구 오류는 trace에 error 기록 후 안전 기본값"
+}

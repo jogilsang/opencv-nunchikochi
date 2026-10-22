@@ -1,0 +1,490 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Nunchikochi (OpenCV AI Competition 2026) - single-stack infra. OWNER: cloud tab.
+  Web (private S3 + CloudFront OAC), service (Lambda arm64 zip + Function URL, app-level
+  X-Api-Key), DynamoDB (TTL, on-demand), CloudWatch logs (14d), reserved concurrency,
+  budget alarm. One `destroy` deletes everything. No secrets in plaintext (API key read
+  from SSM SecureString at runtime). Deploy/teardown via cloud/deploy.sh / destroy.sh.
+
+# ---------------------------------------------------------------------------
+Parameters:
+  Prefix:
+    Type: String
+    Default: nunchi
+    Description: Resource name prefix (RULES).
+  DeleteAfter:
+    Type: String
+    Default: "2026-11-30"
+    Description: delete-after tag value (RULES).
+  LambdaCodeBucket:
+    Type: String
+    Description: S3 bucket holding the Lambda zip (created+filled by deploy.sh before stack create).
+  LambdaCodeKey:
+    Type: String
+    Description: S3 key of the Lambda zip (service + arm64 deps + models).
+  ApiKeyParamName:
+    Type: String
+    Default: /nunchi/api-key
+    Description: >-
+      SSM Parameter Store name (SecureString) that holds the app X-Api-Key. The VALUE is
+      created out-of-band by deploy.sh (never in this template/logs). Lambda reads it at runtime.
+  LambdaMemoryMB:
+    Type: Number
+    Default: 1536
+    AllowedValues: [1024, 1536, 2048, 3008]
+    Description: >-
+      Memory (and proportional vCPU). 1536MB gives ~1 vCPU-equivalent on arm64, matching
+      the vision p95<250ms target (CONTRACTS §1); OpenCV decode+detect is CPU-bound.
+  LambdaTimeoutS:
+    Type: Number
+    Default: 15
+    MinValue: 3
+    MaxValue: 29
+    Description: >-
+      15s: a single frame is sub-second; the ceiling only guards cold starts / model load.
+      Kept <29s because CloudFront/Function URL integration timeouts sit near there.
+  ReservedConcurrency:
+    Type: Number
+    Default: 5
+    Description: Hard ceiling on concurrent executions (cost + abuse guard for a demo).
+  BudgetEmail:
+    Type: String
+    Default: ""
+    Description: Optional email for the $20 budget alarm. Empty = no subscriber (budget still created).
+  EnableBudget:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      Create the AWS Budgets resource. Default false: AWS Budgets is managed at the PAYER
+      account level, so a linked/member account (e.g. captain) cannot create it (AccessDenied).
+      Set true only when deploying from a payer account. On a member account, the payer owner
+      sets the $20 budget out-of-band.
+
+Conditions:
+  HasBudgetEmail: !And [!Condition EnableBudgetCond, !Not [!Equals [!Ref BudgetEmail, ""]]]
+  EnableBudgetCond: !Equals [!Ref EnableBudget, "true"]
+
+# ---------------------------------------------------------------------------
+Resources:
+
+  # --- Web: private bucket, only reachable through CloudFront (OAC) ---------
+  WebBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      BucketName: !Sub "${Prefix}-web-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - { Key: project, Value: nunchikochi }
+        - { Key: delete-after, Value: !Ref DeleteAfter }
+
+  WebBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudFrontOACReadOnly
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${WebBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${WebDistribution}"
+
+  WebOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${Prefix}-web-oac"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  WebDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub "${Prefix} web"
+        DefaultRootObject: index.html
+        HttpVersion: http2
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: web-s3
+            DomainName: !GetAtt WebBucket.RegionalDomainName
+            OriginAccessControlId: !Ref WebOAC
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          TargetOriginId: web-s3
+          ViewerProtocolPolicy: redirect-to-https
+          # AWS managed "CachingOptimized" policy id (static assets).
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+      Tags:
+        - { Key: project, Value: nunchikochi }
+        - { Key: delete-after, Value: !Ref DeleteAfter }
+
+  # --- Storage: single-table, on-demand, TTL --------------------------------
+  Table:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: !Sub "${Prefix}-sessions"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: pk, AttributeType: S }
+        - { AttributeName: sk, AttributeType: S }
+      KeySchema:
+        - { AttributeName: pk, KeyType: HASH }
+        - { AttributeName: sk, KeyType: RANGE }
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - { Key: project, Value: nunchikochi }
+        - { Key: delete-after, Value: !Ref DeleteAfter }
+
+  # --- Logs: explicit group so retention + teardown are controlled ----------
+  ServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${Prefix}-service"
+      RetentionInDays: 14
+
+  # --- IAM: least privilege -------------------------------------------------
+  ServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${Prefix}-service-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: logs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt ServiceLogGroup.Arn
+        - PolicyName: ddb
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:DeleteItem, dynamodb:Query]
+                Resource: !GetAtt Table.Arn
+        - PolicyName: read-api-key
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApiKeyParamName}"
+      Tags:
+        - { Key: project, Value: nunchikochi }
+        - { Key: delete-after, Value: !Ref DeleteAfter }
+
+  # --- Service: Lambda arm64 (zip) + Function URL ---------------------------
+  ServiceFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: ServiceLogGroup
+    Properties:
+      FunctionName: !Sub "${Prefix}-service"
+      Architectures: [arm64]
+      Runtime: python3.12
+      Handler: nunchi.service.lambda_handler
+      Role: !GetAtt ServiceRole.Arn
+      MemorySize: !Ref LambdaMemoryMB
+      Timeout: !Ref LambdaTimeoutS
+      ReservedConcurrentExecutions: !Ref ReservedConcurrency
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref LambdaCodeKey
+      Environment:
+        Variables:
+          NUNCHI_STATE_BACKEND: dynamo
+          NUNCHI_TABLE: !Ref Table
+          NUNCHI_MODELS_DIR: /var/task/models
+          NUNCHI_API_KEY_PARAM: !Ref ApiKeyParamName
+          NUNCHI_CORS_ORIGINS: !Sub "https://${WebDistribution.DomainName}"
+      Tags:
+        - { Key: project, Value: nunchikochi }
+        - { Key: delete-after, Value: !Ref DeleteAfter }
+
+  # --- Public entry point: API Gateway HTTP API (Function URL was org-SCP-blocked) ------
+  # The public Lambda Function URL (AuthType NONE) is denied by an org SCP on this member
+  # account (see docs/cloud/DEPLOY_LOG.md). Same stack/region/prefix/tags; only the public
+  # entry point changes to an HTTP API that proxies the same Lambda. App-level X-Api-Key
+  # (SSM) is unchanged.
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub "${Prefix}-api"
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowOrigins:
+          - !Sub "https://${WebDistribution.DomainName}"
+          - "http://localhost:8099"
+          - "http://127.0.0.1:8099"
+        AllowMethods: [GET, POST, OPTIONS]
+        AllowHeaders: [content-type, x-api-key]
+        MaxAge: 300
+      Tags: { project: nunchikochi, delete-after: !Ref DeleteAfter }
+
+  HttpApiIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt ServiceFunction.Arn
+      PayloadFormatVersion: "2.0"
+      IntegrationMethod: POST
+
+  HttpApiDefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "$default"
+      Target: !Sub "integrations/${HttpApiIntegration}"
+
+  HttpApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: "$default"
+      AutoDeploy: true
+      # Low default throttle: a demo endpoint, abuse guard (app also rate-limits per session).
+      DefaultRouteSettings:
+        ThrottlingRateLimit: 20
+        ThrottlingBurstLimit: 40
+      AccessLogSettings:
+        DestinationArn: !GetAtt ApiAccessLogGroup.Arn
+        # Minimal fields only — NO request/response body, no headers (privacy).
+        Format: '{"rid":"$context.requestId","t":"$context.requestTime","ip":"$context.identity.sourceIp","m":"$context.httpMethod","p":"$context.path","s":"$context.status","len":"$context.responseLength","ms":"$context.responseLatency"}'
+      Tags: { project: nunchikochi, delete-after: !Ref DeleteAfter }
+
+  ApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub "/aws/apigw/${Prefix}-api"
+      RetentionInDays: 14
+
+  # Allow ONLY this API (its ARN) to invoke the Lambda — not a public principal.
+  HttpApiInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ServiceFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*"
+
+  # --- Cost guard: CloudWatch alarm (member account cannot use AWS Budgets) -
+  Budget:
+    Type: AWS::Budgets::Budget
+    Condition: EnableBudgetCond
+    Properties:
+      Budget:
+        BudgetName: !Sub "${Prefix}-monthly"
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit: { Amount: 20, Unit: USD }
+        CostFilters:
+          TagKeyValue: ["user:project$nunchikochi"]
+      NotificationsWithSubscribers: !If
+        - HasBudgetEmail
+        - - Notification:
+              NotificationType: ACTUAL
+              ComparisonOperator: GREATER_THAN
+              Threshold: 80
+            Subscribers:
+              - { SubscriptionType: EMAIL, Address: !Ref BudgetEmail }
+        - !Ref AWS::NoValue
+
+  # Cost guard for a MEMBER account (AWS Budgets is payer-only): an SNS topic + a CloudWatch
+  # alarm on API Gateway request volume. A spike in requests is the cost driver here (Lambda
+  # + API Gateway are request-priced), so a request-count ceiling is the proxy for "$ going up".
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Condition: HasBudgetEmail
+    Properties:
+      TopicName: !Sub "${Prefix}-alerts"
+      Subscription:
+        - { Protocol: email, Endpoint: !Ref BudgetEmail }
+      Tags:
+        - { Key: project, Value: nunchikochi }
+        - { Key: delete-after, Value: !Ref DeleteAfter }
+
+  ApiRequestSpikeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Prefix}-api-request-spike"
+      AlarmDescription: >-
+        API request volume unusually high (cost proxy for a member account that cannot use
+        AWS Budgets). ~50k req/5min ≈ far above the expected demo load.
+      Namespace: AWS/ApiGateway
+      MetricName: Count
+      Dimensions:
+        - { Name: ApiId, Value: !Ref HttpApi }
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 50000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasBudgetEmail, [!Ref AlertTopic], !Ref "AWS::NoValue"]
+
+  # --- Observability: alarms + dashboard ------------------------------------
+  # Lambda hitting the concurrency ceiling (throttles) = abuse or a runaway client.
+  ThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Prefix}-throttles"
+      AlarmDescription: Lambda throttled (reserved-concurrency ceiling hit)
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions:
+        - { Name: FunctionName, Value: !Ref ServiceFunction }
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  FunctionErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Prefix}-fn-errors"
+      AlarmDescription: Lambda invocation errors elevated
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - { Name: FunctionName, Value: !Ref ServiceFunction }
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  # App-level errors from the EMF Errors metric (namespace nunchikochi). High app-error
+  # count = bad input flood or a broken client; worth a look before the budget alarm.
+  AppErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Prefix}-app-errors"
+      AlarmDescription: Application error-code rate elevated (EMF Errors)
+      Namespace: nunchikochi
+      MetricName: Errors
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 50
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  Dashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${Prefix}-service"
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric", "x": 0, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "Frame latency (p50/p95, ms)",
+                "region": "${AWS::Region}",
+                "metrics": [
+                  [ "nunchikochi", "FrameLatencyMs", { "stat": "p50", "label": "p50" } ],
+                  [ "...", { "stat": "p95", "label": "p95" } ]
+                ],
+                "period": 300, "view": "timeSeries"
+              }
+            },
+            {
+              "type": "metric", "x": 12, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "Decisions / sessions",
+                "region": "${AWS::Region}",
+                "metrics": [
+                  [ "nunchikochi", "Decisions", { "stat": "Sum" } ],
+                  [ "nunchikochi", "Sessions", { "stat": "Sum" } ]
+                ],
+                "period": 300, "view": "timeSeries"
+              }
+            },
+            {
+              "type": "metric", "x": 0, "y": 6, "width": 12, "height": 6,
+              "properties": {
+                "title": "Errors (app + rate limit)",
+                "region": "${AWS::Region}",
+                "metrics": [
+                  [ "nunchikochi", "Errors", { "stat": "Sum" } ],
+                  [ "nunchikochi", "RateLimited", { "stat": "Sum" } ]
+                ],
+                "period": 300, "view": "timeSeries"
+              }
+            },
+            {
+              "type": "metric", "x": 12, "y": 6, "width": 12, "height": 6,
+              "properties": {
+                "title": "Lambda throttles / errors",
+                "region": "${AWS::Region}",
+                "metrics": [
+                  [ "AWS/Lambda", "Throttles", "FunctionName", "${Prefix}-service", { "stat": "Sum" } ],
+                  [ "AWS/Lambda", "Errors", "FunctionName", "${Prefix}-service", { "stat": "Sum" } ]
+                ],
+                "period": 300, "view": "timeSeries"
+              }
+            }
+          ]
+        }
+
+# ---------------------------------------------------------------------------
+Outputs:
+  WebUrl:
+    Description: Public web URL (CloudFront).
+    Value: !Sub "https://${WebDistribution.DomainName}"
+  WebBucketName:
+    Description: Private web bucket (upload static files here via deploy.sh).
+    Value: !Ref WebBucket
+  ApiBase:
+    Description: Service base URL (API Gateway HTTP API). Put this in web/config.json as apiBase.
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+  TableName:
+    Value: !Ref Table
+  FunctionName:
+    Value: !Ref ServiceFunction
+  ApiKeyParamName:
+    Description: SSM SecureString name holding the X-Api-Key (value set out-of-band).
+    Value: !Ref ApiKeyParamName
+  DashboardName:
+    Description: CloudWatch dashboard (latency, decisions, errors, throttles).
+    Value: !Ref Dashboard

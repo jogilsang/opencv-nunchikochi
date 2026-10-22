@@ -1,0 +1,42 @@
+{
+  "_comment": "Model manifest for reproducible download. V tab owns this. ONNX files are gitignored; this manifest (name/url/sha256/size/license) is the source of truth. Verified sha256 is computed by download_models.py after fetch. Landmark model ships inside a PINTO tarball, so its entry uses archive_url + member (see download_models.py).",
+  "schema": "1.1",
+  "models": {
+    "face_detection_yunet": {
+      "file": "face_detection_yunet_2023mar.onnx",
+      "url": "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+      "sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
+      "bytes": 232589,
+      "license": "MIT",
+      "source": "opencv/opencv_zoo models/face_detection_yunet",
+      "role": "face detection + 5-point landmarks (both eyes, nose, mouth corners)",
+      "input": "dynamic (set via setInputSize(w,h)); demo uses 320x240",
+      "required": true
+    },
+    "face_landmarks_mediapipe": {
+      "file": "face_landmarks_mediapipe_2023.onnx",
+      "archive_url": "https://s3.ap-northeast-2.wasabisys.com/pinto-model-zoo/410_FaceMeshV2/resources.tar.gz",
+      "archive_member": "face_landmarks_detector_1x3x256x256.onnx",
+      "sha256": "70fe4e14169ca084b03b8103077a4051296e07939a19c1fdfd1f18b3792b4048",
+      "bytes": 4955225,
+      "license": "Apache-2.0",
+      "source": "PINTO0309/PINTO_model_zoo 410_FaceMeshV2 (ONNX port of Google MediaPipe Face Mesh V2; original model Apache-2.0)",
+      "role": "478-point face mesh (468 face + 10 iris), x,y,z; used for EAR (eyelids), MAR (lips), head roll/pitch proxy",
+      "input": "256x256 BGR->RGB, scale 1/255; output Identity (1,1,1,1434) = 478*3",
+      "note": "PINTO S3 archive URL may change over time; source repo is the stable reference. Verify by sha256.",
+      "required": true
+    },
+    "palm_detection_mediapipe": {
+      "file": "palm_detection_mediapipe_2023feb.onnx",
+      "url": "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/palm_detection_mediapipe/palm_detection_mediapipe_2023feb.onnx",
+      "sha256": "78ff51c38496b7fc8b8ebdb6cc8c1abb02fa6c38427c6848254cdaba57fcce7c",
+      "bytes": 3905734,
+      "license": "Apache-2.0",
+      "source": "opencv/opencv_zoo models/palm_detection_mediapipe (ONNX port of Google MediaPipe palm detector; Apache-2.0)",
+      "role": "palm bounding boxes (SSD, 2016 anchors). V7: hand-near-mouth proximity for 'drink'. No 21-pt handpose model (bbox centre suffices).",
+      "input": "192x192 BGR->RGB, scale 1/255; outputs Identity (1,2016,18) box/landmark deltas + Identity_1 (1,2016,1) score; anchors generated (vision/hands.py).",
+      "note": "OPTIONAL: if absent, 'drink' is simply not emitted and the rest of vision is unaffected. Anchors are generated deterministically (verified against the official literal), not embedded.",
+      "required": false
+    }
+  }
+}

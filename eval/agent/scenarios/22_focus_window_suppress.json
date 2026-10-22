@@ -1,0 +1,16 @@
+{
+  "id": "focus_window_suppress",
+  "description": "오래 조용함(자세 안정+낮은 깜빡임, 지속 신호 없음) -> suppress_focus(focus_window)",
+  "mode": "deterministic",
+  "config": {"focus_min_quiet_s": 120, "sustained_min_s": 180},
+  "steps": [
+    {"frame": {"t": 10.0, "face_present": true, "persons": 1, "metrics": {"head_roll_deg": 1.0}, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96}, "events": []}},
+    {"frame": {"t": 40.0, "face_present": true, "persons": 1, "metrics": {"head_roll_deg": 1.0}, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96}, "events": []}},
+    {"frame": {"t": 70.0, "face_present": true, "persons": 1, "metrics": {"head_roll_deg": 1.0}, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96}, "events": []}},
+    {"frame": {"t": 100.0, "face_present": true, "persons": 1, "metrics": {"head_roll_deg": 1.2}, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96}, "events": []}},
+    {"frame": {"t": 130.0, "face_present": true, "persons": 1, "metrics": {"head_roll_deg": 1.1}, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96}, "events": []}},
+    {"frame": {"t": 160.0, "face_present": true, "persons": 1, "metrics": {"head_roll_deg": 1.2}, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96}, "events": []},
+     "expect_action": "suppress_focus", "expect_tools": ["get_metrics_window", "suppress"]}
+  ],
+  "note": "집중 구간엔 넛지 억제"
+}

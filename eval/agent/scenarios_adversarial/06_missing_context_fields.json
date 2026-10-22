@@ -1,0 +1,12 @@
+{
+  "id": "adv_missing_context_fields",
+  "category": "missing-context",
+  "description": "프레임에서 metrics/quality/events 등 대부분이 누락됨 -> 관대하게 기본값, 안전 동작(죽지 않음)",
+  "mode": "deterministic",
+  "steps": [
+    {"frame": {"t": 5.0},
+     "expect_action": "suppress_focus"}
+  ],
+  "expect": "_frame_from_dict가 기본값으로 보강(face 없음·persons 0·quality ok). away로 조용히. 예외 없이 결정 1개 반환.",
+  "note": "적대: 컨텍스트/필드 누락"
+}

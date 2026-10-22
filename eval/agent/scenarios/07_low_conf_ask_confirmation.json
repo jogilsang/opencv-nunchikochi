@@ -1,0 +1,13 @@
+{
+  "id": "low_conf_ask_confirmation",
+  "description": "확신 0.5 drink, second_look도 그대로 -> ask_confirmation(사람 개입)",
+  "mode": "deterministic",
+  "vision_variants": {"zoom_face": {"face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+                                     "events": [{"type": "drink", "start": 29.0, "end": 30.0, "confidence": 0.5}]}},
+  "steps": [
+    {"frame": {"t": 30.0, "face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+               "events": [{"type": "drink", "start": 29.0, "end": 30.0, "confidence": 0.5}]},
+     "expect_action": "ask_confirmation", "expect_tools": ["second_look", "ask_confirmation"]}
+  ],
+  "note": "재분석해도 불확실하면 사람에게 물음"
+}

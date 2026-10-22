@@ -1,0 +1,13 @@
+{
+  "name": "nunchi-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Nunchikochi web client (static). e2e runner only; the app itself needs no build.",
+  "type": "module",
+  "scripts": {
+    "serve": "python3 -m http.server 8099 --directory .",
+    "e2e": "node e2e/serve-and-run.mjs",
+    "e2e:live": "node e2e/live.mjs"
+  },
+  "comment": "Playwright is not vendored. Install ad hoc (npx playwright) or point NODE_PATH at an install, then: npm run e2e. e2e:live needs a running service (scripts/run_local.sh) + a static server; set SVC/KEY/BASE."
+}

@@ -1,0 +1,12 @@
+{
+  "id": "adv_malformed_events",
+  "category": "missing-context",
+  "description": "events 배열에 dict가 아닌 값(null, 숫자)이 섞인 깨진 입력 -> 걸러내고 죽지 않음",
+  "mode": "deterministic",
+  "steps": [
+    {"frame": {"t": 6.0, "face_present": false, "persons": 0, "events": [null, 123, "oops", {"type": "blink", "start": 5.0, "end": 6.0, "confidence": 0.9}]},
+     "expect_action": "suppress_focus"}
+  ],
+  "expect": "_frame_from_dict가 dict 아닌 이벤트를 건너뜀. 나머지로 정상 진행. quality 기본 ok·얼굴 없음 -> away suppress. 예외 없음.",
+  "note": "적대: 깨진 이벤트 입력(타입 오류)"
+}

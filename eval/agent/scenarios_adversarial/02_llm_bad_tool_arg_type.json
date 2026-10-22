@@ -1,0 +1,18 @@
+{
+  "id": "adv_llm_bad_tool_arg_type",
+  "category": "tool-arg-outlier",
+  "description": "LLM이 도구 인자에 이상한 타입(window_s='NaN')을 넣음 -> 스키마 검증 거부 -> 규칙 폴백",
+  "mode": "llm",
+  "llm_script": {"low_confidence": {"action": "ask_confirmation",
+                                    "message": "Did you just yawn?",
+                                    "message_ko": "방금 하품을 했나요?",
+                                    "reason": "llm:yawn",
+                                    "tool_calls": [{"tool": "get_metrics_window", "args": {"window_s": "NaN"}}]}},
+  "steps": [
+    {"frame": {"t": 30.0, "face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+               "events": [{"type": "yawn", "start": 29.0, "end": 30.0, "confidence": 0.5}]},
+     "expect_action": "ask_confirmation", "expect_planner": "rules"}
+  ],
+  "expect": "가드레일이 bad_arg_type로 거부, 규칙 결정이 유지된다.",
+  "note": "적대: 도구 인자 이상값(문자열이 와야 할 자리/숫자가 와야 할 자리)"
+}

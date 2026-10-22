@@ -1,0 +1,105 @@
+{
+  "resolution": "320x240",
+  "pipeline": "YuNet detect + FaceMesh 478pts + metrics",
+  "machine": "mac arm64 (dev)",
+  "overall_median_ms": 5.7,
+  "overall_p95_ms": 8.99,
+  "samples": [
+    {
+      "name": "lena.jpg",
+      "persons": 1,
+      "median_ms": 8.57,
+      "p95_ms": 8.99,
+      "ear": 0.3973,
+      "roll_deg": 1.07
+    },
+    {
+      "name": "messi5.jpg",
+      "persons": 1,
+      "median_ms": 8.57,
+      "p95_ms": 9.03,
+      "ear": 0.246,
+      "roll_deg": -5.27
+    },
+    {
+      "name": "largest_selfie.jpg",
+      "persons": 13,
+      "median_ms": 8.47,
+      "p95_ms": 9.08,
+      "ear": 0.2241,
+      "roll_deg": 0.05
+    },
+    {
+      "name": "basketball1.png",
+      "persons": 1,
+      "median_ms": 8.36,
+      "p95_ms": 9.17,
+      "ear": 0.2362,
+      "roll_deg": -5.65
+    },
+    {
+      "name": "graf1.png",
+      "persons": 0,
+      "median_ms": 5.22,
+      "p95_ms": 5.93,
+      "ear": null,
+      "roll_deg": null
+    },
+    {
+      "name": "fruits.jpg",
+      "persons": 0,
+      "median_ms": 5.28,
+      "p95_ms": 5.96,
+      "ear": null,
+      "roll_deg": null
+    },
+    {
+      "name": "baboon.jpg",
+      "persons": 0,
+      "median_ms": 5.56,
+      "p95_ms": 6.04,
+      "ear": null,
+      "roll_deg": null
+    },
+    {
+      "name": "box.png",
+      "persons": 0,
+      "median_ms": 5.53,
+      "p95_ms": 5.76,
+      "ear": null,
+      "roll_deg": null
+    },
+    {
+      "name": "building.jpg",
+      "persons": 0,
+      "median_ms": 5.15,
+      "p95_ms": 5.7,
+      "ear": null,
+      "roll_deg": null
+    },
+    {
+      "name": "butterfly.jpg",
+      "persons": 0,
+      "median_ms": 5.61,
+      "p95_ms": 5.98,
+      "ear": null,
+      "roll_deg": null
+    },
+    {
+      "name": "apple.jpg",
+      "persons": 0,
+      "median_ms": 5.14,
+      "p95_ms": 5.32,
+      "ear": null,
+      "roll_deg": null
+    },
+    {
+      "name": "board.jpg",
+      "persons": 0,
+      "median_ms": 5.52,
+      "p95_ms": 5.78,
+      "ear": null,
+      "roll_deg": null
+    }
+  ]
+}

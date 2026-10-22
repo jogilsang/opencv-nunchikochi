@@ -1,0 +1,11 @@
+{
+  "id": "normal_clean_frame",
+  "description": "정상 프레임(짧은 blink) -> action none",
+  "mode": "deterministic",
+  "steps": [
+    {"frame": {"t": 5.0, "face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+               "events": [{"type": "blink", "start": 4.9, "end": 5.0, "confidence": 0.9}]},
+     "expect_action": "none", "expect_planner": "rules"}
+  ],
+  "note": "평상시 프레임은 규칙 경로, 지연/비용 0"
+}

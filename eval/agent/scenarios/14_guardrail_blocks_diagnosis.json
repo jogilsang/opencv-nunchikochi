@@ -1,0 +1,15 @@
+{
+  "id": "guardrail_blocks_diagnosis",
+  "description": "llm이 진단 표현('You look tired')을 내도 가드레일이 안전 문구로 교체(action 유지)",
+  "mode": "llm",
+  "llm_script": {"low_confidence": {"action": "ask_confirmation",
+                                    "message": "You look tired. Did you doze off?",
+                                    "message_ko": "피곤해 보여요. 졸았나요?",
+                                    "reason": "llm:drink"}},
+  "steps": [
+    {"frame": {"t": 30.0, "face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+               "events": [{"type": "drink", "start": 29.0, "end": 30.0, "confidence": 0.5}]},
+     "expect_action": "ask_confirmation", "expect_planner": "llm"}
+  ],
+  "note": "진단 금지 후처리: 걸린 문구는 템플릿으로 교체되나 LLM 결정 자체는 수용"
+}

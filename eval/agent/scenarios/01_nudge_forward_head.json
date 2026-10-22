@@ -1,0 +1,15 @@
+{
+  "id": "nudge_forward_head",
+  "description": "지속 forward_head >= 180s -> 넛지(send_nudge)",
+  "mode": "deterministic",
+  "config": {"sustained_min_s": 180},
+  "steps": [
+    {"frame": {"t": 10.0, "face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+               "events": [{"type": "forward_head", "start": 0.0, "end": null, "confidence": 0.9}]},
+     "expect_action": "none", "expect_planner": "rules"},
+    {"frame": {"t": 200.0, "face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+               "events": [{"type": "forward_head", "start": 0.0, "end": null, "confidence": 0.9}]},
+     "expect_action": "nudge", "expect_tools": ["get_metrics_window", "send_nudge"]}
+  ],
+  "note": "정상 넛지: 3분 이상 지속돼야 발동"
+}

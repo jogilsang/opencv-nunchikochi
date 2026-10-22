@@ -1,0 +1,80 @@
+{
+  "resolution": "320x240",
+  "machine": "mac arm64 (dev)",
+  "overall_median_ms": 3.61,
+  "overall_p95_ms": 4.51,
+  "samples": [
+    {
+      "name": "lena.jpg",
+      "persons": 1,
+      "median_ms": 3.79,
+      "p95_ms": 4.4
+    },
+    {
+      "name": "messi5.jpg",
+      "persons": 1,
+      "median_ms": 4.19,
+      "p95_ms": 5.52
+    },
+    {
+      "name": "largest_selfie.jpg",
+      "persons": 13,
+      "median_ms": 3.64,
+      "p95_ms": 3.9
+    },
+    {
+      "name": "basketball1.png",
+      "persons": 1,
+      "median_ms": 3.59,
+      "p95_ms": 4.08
+    },
+    {
+      "name": "graf1.png",
+      "persons": 0,
+      "median_ms": 3.52,
+      "p95_ms": 3.84
+    },
+    {
+      "name": "fruits.jpg",
+      "persons": 0,
+      "median_ms": 3.45,
+      "p95_ms": 4.05
+    },
+    {
+      "name": "baboon.jpg",
+      "persons": 0,
+      "median_ms": 3.64,
+      "p95_ms": 3.95
+    },
+    {
+      "name": "box.png",
+      "persons": 0,
+      "median_ms": 3.67,
+      "p95_ms": 3.92
+    },
+    {
+      "name": "building.jpg",
+      "persons": 0,
+      "median_ms": 3.53,
+      "p95_ms": 3.72
+    },
+    {
+      "name": "butterfly.jpg",
+      "persons": 0,
+      "median_ms": 3.48,
+      "p95_ms": 3.9
+    },
+    {
+      "name": "apple.jpg",
+      "persons": 0,
+      "median_ms": 3.64,
+      "p95_ms": 4.05
+    },
+    {
+      "name": "board.jpg",
+      "persons": 0,
+      "median_ms": 3.47,
+      "p95_ms": 5.07
+    }
+  ]
+}

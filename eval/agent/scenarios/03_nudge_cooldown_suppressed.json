@@ -1,0 +1,18 @@
+{
+  "id": "nudge_cooldown_suppressed",
+  "description": "넛지 후 쿨다운 중 재신호 -> suppress_focus(cooldown)",
+  "mode": "deterministic",
+  "config": {"sustained_min_s": 180},
+  "steps": [
+    {"frame": {"t": 10.0, "face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+               "events": [{"type": "forward_head", "start": 0.0, "end": null, "confidence": 0.9}]},
+     "expect_action": "none"},
+    {"frame": {"t": 200.0, "face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+               "events": [{"type": "forward_head", "start": 0.0, "end": null, "confidence": 0.9}]},
+     "expect_action": "nudge"},
+    {"frame": {"t": 260.0, "face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+               "events": [{"type": "forward_head", "start": 0.0, "end": null, "confidence": 0.9}]},
+     "expect_action": "suppress_focus"}
+  ],
+  "note": "쿨다운이 과다 넛지를 억제"
+}

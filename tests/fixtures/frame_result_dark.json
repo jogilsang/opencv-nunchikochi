@@ -1,0 +1,31 @@
+{
+ "schema": "1.0",
+ "session_id": "demo",
+ "t": 3.0,
+ "face_present": false,
+ "persons": 0,
+ "metrics": {
+  "ear": null,
+  "mar": null,
+  "head_roll_deg": null,
+  "head_pitch_proxy": null,
+  "face_scale": null,
+  "shoulder_ear_ratio": null,
+  "hand_mouth_dist": null
+ },
+ "quality": {
+  "ok": false,
+  "brightness": 22.0,
+  "sharpness": 0.0,
+  "face_px": 0,
+  "issues": [
+   "too_dark",
+   "no_face"
+  ]
+ },
+ "events": [],
+ "calibrated": false,
+ "latency_ms": 0.0,
+ "backend": "opencv",
+ "cv_version": ""
+}

@@ -1,0 +1,15 @@
+{
+  "id": "bilingual_nudge_message",
+  "description": "넛지 메시지가 영어+한국어 둘 다, 관찰 기반(진단 아님)",
+  "mode": "deterministic",
+  "config": {"sustained_min_s": 60},
+  "steps": [
+    {"frame": {"t": 5.0, "face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+               "events": [{"type": "head_tilt", "start": 0.0, "end": null, "confidence": 0.85}]},
+     "expect_action": "none"},
+    {"frame": {"t": 70.0, "face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+               "events": [{"type": "head_tilt", "start": 0.0, "end": null, "confidence": 0.85}]},
+     "expect_action": "nudge", "expect_tools": ["send_nudge"]}
+  ],
+  "note": "message/message_ko 동시 제공은 러너가 별도 검사(아래 assert_bilingual)"
+}

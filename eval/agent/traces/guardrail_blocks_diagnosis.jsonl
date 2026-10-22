@@ -1,0 +1,1 @@
+{"ts": 1792632843708, "session_id": "guardrail_blocks_diagnosis", "frame_t": 30.0, "tool": "planner", "args": {}, "result_summary": "llm:ask_confirmation", "decision": "ask_confirmation", "evidence": {}, "reason": "llm:drink", "tool_calls": [], "planner": "llm"}

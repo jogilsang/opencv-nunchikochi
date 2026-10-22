@@ -1,0 +1,19 @@
+{
+  "id": "llm_nudge_wording",
+  "description": "llm 모드: 지속 넛지 순간에 LLM이 문구 개인화 -> planner=llm, 쿨다운 가드 유지",
+  "mode": "llm",
+  "config": {"sustained_min_s": 180},
+  "llm_script": {"nudge_wording": {"action": "nudge",
+                                   "message": "You've been close to the screen a while; ease back?",
+                                   "message_ko": "한동안 화면에 가까웠어요; 등을 펴볼까요?",
+                                   "reason": "llm:nudge_personalised"}},
+  "steps": [
+    {"frame": {"t": 10.0, "face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+               "events": [{"type": "forward_head", "start": 0.0, "end": null, "confidence": 0.9}]},
+     "expect_action": "none"},
+    {"frame": {"t": 300.0, "face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+               "events": [{"type": "forward_head", "start": 0.0, "end": null, "confidence": 0.9}]},
+     "expect_action": "nudge", "expect_planner": "llm"}
+  ],
+  "note": "LLM이 넛지 문구만 개선, 쿨다운/상한은 가드레일이 보장"
+}

@@ -1,0 +1,14 @@
+{
+  "id": "llm_timeout_fallback",
+  "description": "llm 계획기가 타임아웃보다 느림 -> 신뢰 안 함, 규칙 결정 유지",
+  "mode": "llm",
+  "config": {"llm_timeout_s": 0.001},
+  "llm_sleep_s": 0.05,
+  "llm_script": {"low_confidence": {"action": "none", "reason": "llm:slow"}},
+  "steps": [
+    {"frame": {"t": 30.0, "face_present": true, "persons": 1, "quality": {"ok": true, "brightness": 118, "sharpness": 210, "face_px": 96},
+               "events": [{"type": "drink", "start": 29.0, "end": 30.0, "confidence": 0.5}]},
+     "expect_action": "ask_confirmation", "expect_planner": "rules"}
+  ],
+  "note": "느린 LLM은 그 프레임에서 신뢰하지 않고 규칙 폴백"
+}

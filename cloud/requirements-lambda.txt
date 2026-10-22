@@ -1,0 +1,14 @@
+# Runtime deps that ship INSIDE the Lambda arm64 zip. OWNER: cloud tab.
+#
+# This file is documentation: the authoritative install list lives in cloud/package.sh,
+# which resolves arm64 manylinux wheels with --only-binary=:all:. Keep the two in sync.
+#
+# - boto3 is EXCLUDED here: the Lambda Python runtime already provides it.
+# - numpy is a RANGE, not a hard pin: 2.5.x has no aarch64 manylinux wheel (source build
+#   fails on Graviton). The range resolves to the newest wheel that exists (2.2.6 today).
+# - httpx / moto are test-only (see pyproject [dependency-groups].dev) and never shipped.
+opencv-python-headless==5.0.0.93
+numpy>=1.26,<3
+fastapi==0.159.1
+mangum==0.22.0
+python-multipart==0.0.32
