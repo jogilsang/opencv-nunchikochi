@@ -106,6 +106,9 @@ token), what the server does (analysed in memory on AWS, then discarded), what i
 - A persistent "camera on" badge and discard notes are shown wherever the preview appears.
 - The overlay is display-only geometry (0–1 coords); no image leaves the preview view.
 - The share card contains numbers only — no face, no image.
+- The **posture buddy** (W10) uses the pose **angle numbers only** — no image or raw landmark
+  points — and the privacy modal states this. Its rewind timeline is a browser-memory ring
+  buffer (max ~30 min): never saved, sent, URL'd, or stored.
 - This is a wellbeing nudge, not a medical or emotional diagnosis.
 
 ## Accessibility (manual checklist)
@@ -125,7 +128,13 @@ Checked manually in a real browser (no CDN `axe`); automated audit is a follow-u
 - **Contrast (WCAG AA, computed):** body text 14.2:1, muted text 7.4–8.2:1, accent on panel
   6.0:1, success 8.2:1, warning 9.4:1, primary-button text on accent 6.8:1 — all ≥ 4.5:1.
 - **Reduced motion — PASS.** `prefers-reduced-motion: reduce` disables the LED pulse, skeleton
-  shimmer, screen fades, and toast slide.
+  shimmer, screen fades, and toast slide. The posture buddy also skips pose smoothing / idle
+  drift under reduced motion.
+- **Posture buddy (W10) — PASS.** The 3D canvas is `role="img"` with a live, plain-language
+  `aria-label` (e.g. "Posture buddy: Chin down 15°, Head leaning forward"); the same state is
+  shown as visible text (not colour-only); view presets, ghost toggle, and keyboard rotation
+  (arrows / Home) are all operable; "Tracking unsure" is text, not just a held pose. Rendered
+  with vendored three.js (no CDN); a 2D fallback keeps console errors at 0 without WebGL.
 - **Zoom / responsive — PASS.** Layout holds at 200% zoom and down to 360px width (agent panel
   becomes a bottom sheet; no horizontal overflow, verified in-browser).
 
@@ -138,10 +147,15 @@ Checked manually in a real browser (no CDN `axe`); automated audit is a follow-u
 
 ## Size
 
-First-load JS (uncompressed, all modules): **≈ 66 KB** (< 100 KB budget). Per file: app.js 30.4,
+First-load JS (uncompressed, app modules): **≈ 66 KB** (< 100 KB budget). Per file: app.js 30.4,
 i18n.js 14.0, mock.js 9.3, capture.js 4.8, sharecard.js 3.8, overlay.js 3.0, api.js 2.7 KB.
-No external libraries or fonts. (`mock.js` is dev/demo only and could be dropped from a
-production build.)
+No external libraries or fonts in the core flow. (`mock.js` is dev/demo only and could be
+dropped from a production build.)
+
+The posture buddy (W10) adds `buddy.js` (≈ 15 KB) plus the **vendored** three.js renderer
+`vendor/three.module.min.js` (**652 KB**, MIT r158, under the 700 KB target; `vendor/three.LICENSE`).
+three.js is loaded lazily via dynamic `import()` only when the run screen mounts, and nothing
+loads from a CDN. If three.js or WebGL is unavailable the buddy falls back to a tiny 2D canvas.
 
 ## Files
 
@@ -154,6 +168,9 @@ production build.)
 | `capture.js` | getUserMedia → 320×240 JPEG ≤ 2 fps, tab-hidden pause, exponential backoff; canvas fake-video for mock |
 | `overlay.js` | draws the face box + landmark points over the mirrored preview (mirrors x, clamps out-of-range coords) |
 | `sharecard.js` | renders a numbers-only share card to a PNG blob + triggers download |
+| `buddy.js` | posture buddy (W10): numbers-only 3D clay figure (sphere head + capsule body), pose→rotation (mirror signs, ~1.5× exaggeration), good-posture ghost, drag/arrow rotation, low-conf hold, 2D fallback; `samplePoseAt`/`describePose` helpers |
+| `vendor/three.module.min.js` | vendored three.js r158 (MIT, `vendor/three.LICENSE`, 652 KB) — the only renderer dep, lazy-loaded, no CDN |
+| `assets/pose-fixture.json` | synthetic neck pose time series (numbers only) that drives the buddy until vision ships real `overlay.pose` |
 | `i18n.js` | all user-facing strings (EN primary, KO) |
 | `styles.css` | calm/trust visual design, focus/contrast/reduced-motion, responsive to 360px |
 | `config.example.json` | template for `config.json` (gitignored) |
@@ -165,3 +182,9 @@ Response shapes match `docs/CONTRACTS.md` §1/§2/§3 and `tests/fixtures/*.json
 from `src/nunchi/contracts.py`). The agent panel reads `decision.tool_calls[{tool,args,result_summary}]`
 and highlights the `second_look` tool. Mock data mirrors those fixtures. If the server omits
 `overlay` (null), the preview simply draws nothing.
+
+The posture buddy consumes `FrameResult.overlay.pose` (`{yaw_deg,pitch_deg,roll_deg,depth,conf}`,
+numbers only, relative to calibration, user's-own-view signs). When a frame carries a real pose
+the buddy uses it and stops the fixture feed; otherwise it plays `assets/pose-fixture.json`. The
+rewind timeline keeps poses in a browser-memory ring buffer only — never saved, sent, URL'd, or
+stored.

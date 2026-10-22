@@ -9,6 +9,7 @@ import { DemoApi, DemoLoadError } from "./demo.js";
 import { Capture, CAM, isSecure } from "./capture.js";
 import { drawOverlay, clearOverlay } from "./overlay.js";
 import { buildShareCard, downloadBlob } from "./sharecard.js";
+import { PostureBuddy, samplePoseAt, describePose, EXAGGERATION } from "./buddy.js";
 
 const params = new URLSearchParams(location.search);
 const MOCK = params.get("mock") === "1";
@@ -35,7 +36,15 @@ const state = {
   agentLog: [],          // [{ts, action, reason, tools, evidence, needsHuman, highlight}]
   agentShowAll: false,
   bytesWindow: [],       // [{at, bytes}] for dev KB/s
+  buddy: null,           // PostureBuddy instance (W10)
+  reportBuddy: null,     // PostureBuddy on the report screen (rewind replay)
+  poseFixture: null,     // loaded synthetic pose series (fallback while vision has no pose)
+  poseTimer: null,       // interval feeding fixture poses when the server sends none
+  poseTrack: [],         // in-memory pose ring buffer for session rewind (W10 stage ②)
 };
+
+// Pose rewind ring buffer: browser memory only. Never saved, sent, URL'd, or localStorage'd.
+const POSE_TRACK_MAX = 3600;   // ~30 min at 2/s (fixture is ~0.5s; cap bounds memory regardless)
 
 // ---------- config ----------
 async function loadConfig() {
@@ -74,6 +83,14 @@ function show(id) {
   for (const s of document.querySelectorAll(".screen")) s.classList.toggle("active", s.id === id);
 }
 
+// Reveal the persistent demo marker (full-width bottom strip) and reserve page space for it,
+// so it is always visible but never floats over content. Idempotent.
+function showDemoStrip() {
+  const c = document.getElementById("demo-corner");
+  if (c) c.hidden = false;
+  document.body.classList.add("has-demo-strip");
+}
+
 // ---------- start ----------
 function initStart() {
   const consent = document.getElementById("consent");
@@ -89,8 +106,7 @@ function initStart() {
   if (DEMO) {
     const b = document.getElementById("demo-badge");
     if (b) b.hidden = false;
-    const c = document.getElementById("demo-corner");
-    if (c) c.hidden = false;
+    showDemoStrip();
   }
 
   // Gate the Start button on: mode chosen + consent + (live => key present & service not down).
@@ -242,7 +258,7 @@ async function beginSession({ forceMock = false, live = false } = {}) {
     }
     // badge/corner also show here when demo is picked without the ?demo deep-link
     const b = document.getElementById("demo-badge"); if (b) b.hidden = false;
-    const c = document.getElementById("demo-corner"); if (c) c.hidden = false;
+    showDemoStrip();
     state.capture = new Capture({ fps: state.cfg.fps, mock: true });
     state.recentEvents = [];
     state.lastNudgeAt = 0;
@@ -332,6 +348,190 @@ async function calibrate(calib) {
   startRun();
 }
 
+// ---------- posture buddy (W10) ----------
+// Loads the synthetic pose fixture once (numbers only). While vision (V10) doesn't yet
+// emit FrameResult.overlay.pose, we drive the buddy from this fixture on a timer; when a
+// real pose arrives on a frame we use that instead (see handleFrame).
+async function loadPoseFixture() {
+  if (state.poseFixture) return state.poseFixture;
+  try {
+    const res = await fetch("assets/pose-fixture.json", { cache: "no-store" });
+    if (res.ok) state.poseFixture = await res.json();
+  } catch { /* fixture optional; buddy simply stays neutral */ }
+  return state.poseFixture;
+}
+
+// Record one pose sample into the in-memory rewind buffer (browser memory only).
+function recordPose(pose) {
+  if (!pose) return;
+  const at = (performance.now() - state.startTime) / 1000;
+  state.poseTrack.push({
+    at,
+    yaw: pose.yaw_deg || 0,
+    pitch: pose.pitch_deg || 0,
+    roll: pose.roll_deg || 0,
+    depth: pose.depth == null ? 1 : pose.depth,
+    conf: pose.conf == null ? 1 : pose.conf,
+  });
+  if (state.poseTrack.length > POSE_TRACK_MAX) state.poseTrack.shift();
+  // Reveal + refresh the run-screen rewind timeline once a short history exists,
+  // regardless of whether poses come from the fixture feed or real frames.
+  if (state.poseTrack.length >= 6) {
+    const rewindWrap = document.getElementById("buddy-rewind");
+    if (rewindWrap && rewindWrap.hidden && document.getElementById("screen-run")?.classList.contains("active")) {
+      rewindWrap.hidden = false;
+    }
+    if (state._refreshRunMarks) state._refreshRunMarks();
+  }
+}
+
+async function initBuddy() {
+  const canvas = document.getElementById("buddy-canvas");
+  if (!canvas) return;
+  // tear down any previous instance (new session)
+  if (state.buddy) { try { state.buddy.dispose(); } catch {} state.buddy = null; }
+  const stateEl = document.getElementById("buddy-state");
+  const buddy = new PostureBuddy(canvas, {
+    t,
+    onAria: (text) => {
+      const label = fmtTpl(t("buddyAria"), { state: text });
+      canvas.setAttribute("aria-label", label);
+      if (stateEl) stateEl.textContent = text; // visible text too (not colour-only)
+    },
+  });
+  state.buddy = buddy;
+  const is3d = await buddy.init();
+  // 2D fallback note (console-error-free either way)
+  const note = document.getElementById("buddy-2dnote");
+  if (note) note.hidden = !!is3d;
+
+  // controls
+  const bind = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
+  bind("buddy-front", () => buddy.setView(0, 0));
+  bind("buddy-side", () => buddy.setView(70, 0));
+  bind("buddy-top", () => buddy.setView(0, 60));
+  bind("buddy-reset", () => buddy.resetView());
+  const ghost = document.getElementById("buddy-ghost");
+  if (ghost) { ghost.checked = false; ghost.onchange = () => buddy.setGhost(ghost.checked); }
+
+  // Prime with the fixture so the buddy is alive even before the first pose frame.
+  await loadPoseFixture();
+  state.rewindScrubbing = false;
+  startBuddyFixtureFeed();
+
+  // Run-screen rewind: reveal once we have a few samples; scrub pauses the live feed.
+  const rewindWrap = document.getElementById("buddy-rewind");
+  const slider = document.getElementById("rewind-slider");
+  const marks = document.getElementById("rewind-marks");
+  const timeEl = document.getElementById("rewind-time");
+  const liveBtn = document.getElementById("rewind-live");
+  if (slider) {
+    const onLive = (live) => {
+      state.rewindScrubbing = !live;
+      if (live && !state.usingRealPose) startBuddyFixtureFeed();
+    };
+    state._refreshRunMarks = bindRewind({
+      slider, marks, timeEl, buddy, track: state.poseTrack, liveBtn, onLive,
+    });
+    if (rewindWrap) rewindWrap.hidden = true;
+  }
+}
+
+// Drive the buddy from the fixture timeline on a 30fps-ish cadence (the buddy caps render
+// at 30fps internally). Stops as soon as a real pose arrives from the server.
+function startBuddyFixtureFeed() {
+  stopBuddyFixtureFeed();
+  if (!state.poseFixture || !state.buddy) return;
+  const t0 = performance.now();
+  const dur = fixtureDuration(state.poseFixture);
+  const unsureEl = document.getElementById("buddy-unsure");
+  state.poseTimer = setInterval(() => {
+    if (state.usingRealPose || !state.buddy || state.rewindScrubbing) return;
+    const elapsed = ((performance.now() - t0) / 1000) % (dur || 1);
+    const pose = samplePoseAt(state.poseFixture, elapsed);
+    if (!pose) return;
+    state.buddy.setPose(pose);
+    recordPose(pose);
+    if (unsureEl) unsureEl.hidden = !(pose.conf != null && pose.conf < 0.5);
+    // reveal + refresh the rewind timeline once we have a short history
+    const rewindWrap = document.getElementById("buddy-rewind");
+    if (rewindWrap && state.poseTrack.length >= 6) rewindWrap.hidden = false;
+    if (state._refreshRunMarks) state._refreshRunMarks();
+  }, 120);
+}
+function stopBuddyFixtureFeed() {
+  if (state.poseTimer) { clearInterval(state.poseTimer); state.poseTimer = null; }
+}
+function fixtureDuration(fx) {
+  const s = fx && fx.samples;
+  return s && s.length ? s[s.length - 1].t : 0;
+}
+
+// ---------- session rewind (W10 stage 2) ----------
+// Replays the in-memory pose track (browser memory only). The slider scrubs; "Live" resumes.
+// Forward-head spans (depth above threshold) are drawn as warm marks on the timeline.
+const FWD_MARK_DEPTH = 1.08; // depth above this = "head forward" span on the timeline
+
+function poseFromTrackAt(track, tSec) {
+  if (!track || track.length === 0) return null;
+  if (tSec <= track[0].at) return trackToPose(track[0]);
+  if (tSec >= track[track.length - 1].at) return trackToPose(track[track.length - 1]);
+  for (let i = 1; i < track.length; i++) {
+    if (tSec <= track[i].at) {
+      const a = track[i - 1], b = track[i];
+      const span = b.at - a.at || 1;
+      const k = (tSec - a.at) / span;
+      const L = (x, y) => x + (y - x) * k;
+      return { yaw_deg: L(a.yaw, b.yaw), pitch_deg: L(a.pitch, b.pitch), roll_deg: L(a.roll, b.roll), depth: L(a.depth, b.depth), conf: Math.min(a.conf, b.conf) };
+    }
+  }
+  return trackToPose(track[track.length - 1]);
+}
+function trackToPose(s) { return { yaw_deg: s.yaw, pitch_deg: s.pitch, roll_deg: s.roll, depth: s.depth, conf: s.conf }; }
+
+function drawRewindMarks(canvas, track) {
+  if (!canvas || !track || track.length === 0) return;
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  const t0 = track[0].at, t1 = track[track.length - 1].at;
+  const dur = Math.max(0.001, t1 - t0);
+  // base track
+  ctx.fillStyle = "#2a3850";
+  ctx.fillRect(0, H / 2 - 1, W, 2);
+  // forward-head spans in warm amber (text label carries meaning too — not colour-only)
+  ctx.fillStyle = "#eda354";
+  for (const s of track) {
+    if (s.depth > FWD_MARK_DEPTH) {
+      const x = ((s.at - t0) / dur) * W;
+      ctx.fillRect(Math.max(0, x - 1), 0, 3, H);
+    }
+  }
+}
+
+// Wire a timeline slider + marks canvas to a buddy, scrubbing the given track.
+function bindRewind({ slider, marks, timeEl, buddy, track, liveBtn, onLive }) {
+  if (!slider) return;
+  const refresh = () => drawRewindMarks(marks, track);
+  refresh();
+  const dur = track.length ? (track[track.length - 1].at - track[0].at) : 0;
+  const t0 = track.length ? track[0].at : 0;
+  const onScrub = () => {
+    if (onLive) onLive(false); // entering scrub mode pauses live feed
+    const frac = Number(slider.value) / 100;
+    const tSec = t0 + frac * dur;
+    const pose = poseFromTrackAt(track, tSec);
+    if (pose && buddy) buddy.setPose(pose);
+    if (timeEl) {
+      const label = fmtTpl(t("rewindTimeLabel"), { t: tSec.toFixed(1), state: describePose(pose, t) });
+      timeEl.textContent = label;
+    }
+  };
+  slider.oninput = onScrub;
+  if (liveBtn && onLive) liveBtn.onclick = () => { onLive(true); slider.value = "100"; };
+  return refresh;
+}
+
 // ---------- run ----------
 function startRun() {
   show("screen-run");
@@ -344,6 +544,9 @@ function startRun() {
   initOverlayToggle();
   initAgentPanel();
   renderAgentLog();
+  state.poseTrack = [];
+  state.usingRealPose = false;
+  initBuddy();
   state.capture.startPump(async (blob, tSec) => {
     if (blob && typeof blob.size === "number") recordBytes(blob.size);
     try {
@@ -406,6 +609,17 @@ function handleFrame(resp, tSec = 0) {
   const canvas = document.getElementById("run-overlay");
   if (state.overlayOn) drawOverlay(canvas, state.lastOverlay);
   else clearOverlay(canvas);
+  // posture buddy (W10): if the server sent a real pose, drive the buddy from it and stop
+  // the fixture feed. Numbers only — overlay.pose is {yaw,pitch,roll,depth,conf}.
+  const realPose = result.overlay && result.overlay.pose;
+  if (realPose && state.buddy) {
+    state.usingRealPose = true;
+    stopBuddyFixtureFeed();
+    state.buddy.setPose(realPose);
+    recordPose(realPose);
+    const unsureEl = document.getElementById("buddy-unsure");
+    if (unsureEl) unsureEl.hidden = !(realPose.conf != null && realPose.conf < 0.5);
+  }
   // agent activity: record every decision (incl. "none") for the evidence panel
   recordAgentDecision(decision, tSec);
   if (decision && decision.action && decision.action !== "none") handleDecision(decision);
@@ -671,6 +885,7 @@ function hideTempError() { document.getElementById("temp-error").classList.remov
 // ---------- end + report ----------
 async function endSession() {
   state.capture.stopPump();
+  stopBuddyFixtureFeed();
   let data;
   try {
     data = await state.api.endSession(state.sessionId);
@@ -690,6 +905,32 @@ async function endSession() {
   state.lastReport = { summary: data.summary || {}, report: data.report || {}, previous };
   renderReport(state.lastReport);
   show("screen-report");
+}
+
+// Build the report-screen rewind buddy from the captured pose track (memory only).
+// Hidden if no poses were captured. Starts paused at the first sample; slider scrubs.
+async function initReportBuddy() {
+  const wrap = document.getElementById("report-buddy-wrap");
+  const canvas = document.getElementById("report-buddy-canvas");
+  if (!wrap || !canvas) return;
+  const track = state.poseTrack.slice();
+  if (state.reportBuddy) { try { state.reportBuddy.dispose(); } catch {} state.reportBuddy = null; }
+  if (track.length < 2) { wrap.hidden = true; return; }
+  wrap.hidden = false;
+  const buddy = new PostureBuddy(canvas, { t });
+  state.reportBuddy = buddy;
+  await buddy.init();
+  // start paused on the first frame (don't animate a live feed here)
+  buddy.setPose(trackToPose(track[0]));
+  const slider = document.getElementById("report-rewind-slider");
+  const marks = document.getElementById("report-rewind-marks");
+  const timeEl = document.getElementById("report-rewind-time");
+  if (slider) {
+    slider.value = "0";
+    bindRewind({ slider, marks, timeEl, buddy, track, liveBtn: null, onLive: null });
+    // prime the time label at t0
+    slider.dispatchEvent(new Event("input"));
+  }
 }
 
 function renderReport({ summary: s, report: rep, previous }) {
@@ -732,6 +973,9 @@ function renderReport({ summary: s, report: rep, previous }) {
 
   // behaviour breakdown table
   renderBreakdown(s);
+
+  // posture buddy rewind replay (W10 stage 2) — built from the in-memory pose track
+  initReportBuddy();
 
   // actions
   document.getElementById("btn-copy").onclick = () => copySummary(s, text);
@@ -855,6 +1099,10 @@ function copySummary(s, text) {
 function resetStart() {
   document.getElementById("consent").checked = false;
   document.getElementById("btn-start").disabled = true;
+  // tear down buddies so a new session starts clean (frees WebGL contexts)
+  if (state.reportBuddy) { try { state.reportBuddy.dispose(); } catch {} state.reportBuddy = null; }
+  if (state.buddy) { try { state.buddy.dispose(); } catch {} state.buddy = null; }
+  state.poseTrack = [];
 }
 function resetMetricsUi() {
   for (const id of ["m-ear", "m-roll", "m-scale"]) {
@@ -968,5 +1216,19 @@ function initLang() {
     errorKindFromStatus,
     agentCount: () => state.agentLog.length,
     agentActions: () => state.agentLog.map((r) => r.action),
+    // W10 posture buddy: report mode + a describable state, never image/landmark data.
+    buddyReady: () => !!state.buddy,
+    buddyIs3D: () => !!(state.buddy && state.buddy.mode3d),
+    buddyExaggeration: () => EXAGGERATION,
+    buddyState: () => (state.buddy ? describePose(state.buddy._lastPose, t) : ""),
+    poseTrackLen: () => state.poseTrack.length,
+    reportBuddyReady: () => !!state.reportBuddy,
+    rewindScrub: (frac) => {
+      const sl = document.getElementById("report-rewind-slider");
+      if (sl) { sl.value = String(Math.round(Math.max(0, Math.min(1, frac)) * 100)); sl.dispatchEvent(new Event("input")); }
+    },
+    rewindState: () => (state.reportBuddy ? describePose(state.reportBuddy._lastPose, t) : ""),
+    setBuddyPose: (p) => { if (state.buddy) { state.usingRealPose = true; stopBuddyFixtureFeed(); state.buddy.setPose(p); recordPose(p); const u = document.getElementById("buddy-unsure"); if (u) u.hidden = !(p && p.conf != null && p.conf < 0.5); } },
+    buddySetView: (az, el) => { if (state.buddy) state.buddy.setView(az, el); },
   };
 })();

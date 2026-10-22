@@ -131,3 +131,79 @@ Conductor decision: keep same stack/region/prefix/tags, change only the public e
 - `dynamodb scan nunchi-sessions`: 8 items, state-schema only, **no jpeg/base64/image tokens**.
 - API Gateway access logs (`/aws/apigw/nunchi-api`): rid/time/ip/method/path/status/len/latency
   only — **no body, no headers, no X-Api-Key**. requestId present (valid format).
+
+## C10 — posture-buddy (V10) redeploy, 2026-10-22
+
+Same stack `nunchi` (captain / us-east-1), no new resource kinds. Updated the Lambda code
+(V10 vision: `overlay.pose` + session-state schema 3.0) and the web static (incl. vendored
+three.js posture buddy).
+
+### Steps
+
+- Repackaged the zip (`cloud/package.sh`): **139 MB unzipped** (< 250 MB limit), 54 MB zip;
+  3 ONNX models verified (`download_models.py --check`: yunet, face_landmarks, palm — all ok).
+- `deploy.sh --apply`: zip uploaded; `cloudformation deploy` reported "No changes" (template
+  unchanged), so the Lambda code was updated explicitly with `lambda update-function-code`
+  (CodeSize 57,126,403 → 57,131,166). Web static synced + `config.json` (apiBase only, no key)
+  uploaded; CloudFront `/*` invalidated.
+
+### Smoke (live, key from SSM → process memory only; never printed)
+
+| check | result |
+|---|---|
+| `GET /healthz` | 200 `{ok,cv_version:5.0.0,backend:opencv,arch:aarch64,build:dev,stubs:false}` |
+| no key → `POST /v1/sessions` | 401 `unauthorized` |
+| session create (keyed) | 200 |
+| face frame (`messi5.jpg`) | 200; **`overlay.pose` numeric** `{yaw_deg,pitch_deg,roll_deg,depth,conf}` (floats) |
+| oversize > 200 KB | 413 `payload_too_large` |
+| old-schema (2.x) session reuse | 410 `session_state_invalid` (bilingual); a fresh session still works (200) |
+
+### Web (CloudFront, `curl -I`)
+
+- `/?demo=1` 200, `/index.html` 200, `/config.json` 200 `application/json` (apiBase only),
+  `/vendor/three.module.min.js` 200 `text/javascript` 652 KB, `/vendor/three.LICENSE` 200,
+  `/app.js` 200, `/buddy.js` 200.
+- Playwright fake-camera live check (`web/e2e/live.mjs` against the live API): the
+  connection-status line shows **arm64 · OpenCV 5.0.0** (pass), start-gate/key-in-memory/
+  no-page-errors pass. The full calibrate→run→report flow fails under a *fake* camera
+  (synthetic media has no real face → no calibration completes); the real-face server-side
+  round-trip above already proves the pipeline. Not a deploy defect; noted honestly.
+
+### Privacy (re-verified)
+
+- DynamoDB item (`pk=SESSION#…`, `sk=STATE`): state-schema only — **no `overlay`/`yaw_deg`/
+  `image`/`base64`/`jpeg`/`landmark`/`points`**. The `calibrator.pose_*` / `filters.pose_*`
+  numeric angles are the calibration + smoothing state (CONTRACTS §4 "보정·상태"), not raw
+  landmarks or pixels.
+- Trace JSONL: no `overlay`/`image`/`base64`/`landmark`/`pose` tokens.
+
+### Latency
+
+- Warm server-side `latency_ms`: **median ~281 ms, p95 ~289 ms** (2 × 30 frames) — pose adds
+  ~133 ms (~1.9×) over the C8 pre-pose baseline (148 ms). Within the 2 fps budget. Detail +
+  cost delta in `docs/cloud/LATENCY.md`.
+- Cost alarm (`nunchi-api-request-spike`) and reserved concurrency (5) untouched.
+
+## C11 — latency 2× A/B + V11 switch, 2026-10-22
+
+Same stack `nunchi` (captain / us-east-1). Redeployed V11 (adds `NUNCHI_DISABLE_POSE`
+runtime switch; web untouched) via `package.sh` + `lambda update-function-code`
+(CodeSize 57,131,468). `/healthz` 200 (arm64 · OpenCV 5.0.0), no-key 401 after deploy.
+
+A/B of the C8→C10 2× (details + tables in `docs/cloud/LATENCY.md` C11):
+
+| test | result |
+|---|---|
+| 3× repeat (baseline, same host) | 177.4 / 177.6 / 178.6 ms median — stable, neither 148 nor 281 reproduced |
+| pose off vs on (`NUNCHI_DISABLE_POSE`) | 282.0 vs 283.6 ms → **+1.6 ms** (pose innocent; switch verified 0/30 pose frames when off) |
+| threads 1 vs 2 (`OMP_NUM_THREADS`,`OPENCV_FOR_THREADS_NUM`) | 296.8 vs 299.0 ms → flat (thread over-subscription NOT the cause) |
+| memory 1769 (1 vCPU) vs 1536 | 247.1 vs 281.2 ms → minor vCPU lever, not a 2× factor |
+
+**Conclusion: execution-host (Graviton) variance, not code.** Same code/input/day gave
+178–299 ms by landing on different hosts; every config change forces a fresh host. pose and
+threads are flat across the change. Corrected the earlier C10 "pose +133 ms" claim in
+`LATENCY.md` (kept the text, added a 정정 note).
+
+**Cleanup verified:** all env vars + memory restored to the pre-C11 baseline (1536 MB; 5
+original env vars, no thread/pose vars) and confirmed equal via `get-function-configuration`;
+reserved concurrency (5) and cost alarm untouched; `/healthz` 200, no-key 401 post-restore.

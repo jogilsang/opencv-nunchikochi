@@ -15,6 +15,7 @@ overlay (coordinates/numbers only). V3 adds a behaviour state machine
 """
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,6 +30,7 @@ from nunchi.vision.enhance import enhance_bgr
 from nunchi.vision.events import BehaviorStateMachine
 from nunchi.vision.filters import FilterConfig, StabilizedMetric
 from nunchi.vision.hands import PalmDetector, hand_mouth_distance
+from nunchi.vision.headpose import head_pose_from_landmarks
 from nunchi.vision.landmarks import (
     LandmarkExtractor,
     Landmarks,
@@ -39,7 +41,7 @@ from nunchi.vision.landmarks import (
 from nunchi.vision.metrics import mouth_centre, raw_metrics
 from nunchi.vision.overlay import build_overlay
 
-_STATE_SCHEMA = "2.0"   # V6: baseline EAR is now roll-aligned; 1.0 blobs are rejected.
+_STATE_SCHEMA = "3.0"   # V10: adds head-pose baseline + pose filters. 2.0/1.0 rejected.
 
 # Quality thresholds (BGR mean luma / Laplacian variance).
 _DARK_BELOW = 50.0
@@ -51,6 +53,16 @@ _STRICT_BLUR_BELOW = 120.0
 _STRICT_FACE_PX_MIN = 40
 _ZOOM_MARGIN = 1.6
 _VARIANTS = ("enhance", "zoom_face", "strict")
+
+
+def pose_disabled() -> bool:
+    """Whether head-pose (overlay.pose) is turned off via the environment.
+
+    ``NUNCHI_DISABLE_POSE=1`` disables the V10 posture-buddy pose so operators can
+    A/B pose cost at runtime, or shed it as a safety valve under load, WITHOUT a
+    redeploy. Default (unset/0) = pose ON. Read per call so it can flip live.
+    """
+    return os.environ.get("NUNCHI_DISABLE_POSE", "").strip() in ("1", "true", "True", "yes")
 
 
 @dataclass
@@ -70,6 +82,9 @@ class SessionState:
     _scale: StabilizedMetric | None = None
     _ear: StabilizedMetric | None = None
     _mar: StabilizedMetric | None = None
+    _pose_yaw: StabilizedMetric | None = None   # V10: head-pose overlay smoothing
+    _pose_pitch: StabilizedMetric | None = None
+    _pose_roll: StabilizedMetric | None = None
     _sm: BehaviorStateMachine | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -91,6 +106,9 @@ class SessionState:
                 "scale": self._scale.to_dict() if self._scale else None,
                 "ear": self._ear.to_dict() if self._ear else None,
                 "mar": self._mar.to_dict() if self._mar else None,
+                "pose_yaw": self._pose_yaw.to_dict() if self._pose_yaw else None,
+                "pose_pitch": self._pose_pitch.to_dict() if self._pose_pitch else None,
+                "pose_roll": self._pose_roll.to_dict() if self._pose_roll else None,
             },
             "state_machine": self._sm.to_dict() if self._sm else None,
             "extra": self.extra,
@@ -100,14 +118,15 @@ class SessionState:
     def from_dict(cls, d: dict[str, Any]) -> SessionState:
         if not isinstance(d, dict):
             raise ValueError("SessionState blob must be a dict")  # noqa: TRY004 (restore errors are ValueError by contract)
-        # V6: baseline EAR semantics changed (roll-aligned). Reject older blobs so
-        # a pre-V6 baseline is never mixed with V6 metrics. A fresh/minimal blob
-        # (new_session before any serialise) carries no schema and is allowed.
+        # V10: schema 3.0 adds a head-pose baseline (pose_*0) + pose filters. A
+        # pre-V10 blob (2.0/1.0) lacks the frontal pose reference, so reject it so
+        # overlay.pose is never computed against a missing baseline. A fresh/minimal
+        # blob (new_session before any serialise) carries no schema and is allowed.
         schema = d.get("schema")
         if schema is not None and schema != _STATE_SCHEMA:
             raise ValueError(
                 f"unsupported SessionState schema {schema!r}; expected {_STATE_SCHEMA!r} "
-                "(V6 roll-aligned EAR). Re-calibrate the session."
+                "(V10 head-pose baseline). Re-calibrate the session."
             )
         st = cls(session_id=d["session_id"], frames_seen=d.get("frames_seen", 0),
                  calibrated=d.get("calibrated", False))
@@ -120,6 +139,9 @@ class SessionState:
         st._scale = StabilizedMetric.from_dict(f["scale"]) if f.get("scale") else None
         st._ear = StabilizedMetric.from_dict(f["ear"]) if f.get("ear") else None
         st._mar = StabilizedMetric.from_dict(f["mar"]) if f.get("mar") else None
+        st._pose_yaw = StabilizedMetric.from_dict(f["pose_yaw"]) if f.get("pose_yaw") else None
+        st._pose_pitch = StabilizedMetric.from_dict(f["pose_pitch"]) if f.get("pose_pitch") else None
+        st._pose_roll = StabilizedMetric.from_dict(f["pose_roll"]) if f.get("pose_roll") else None
         sm = d.get("state_machine")
         st._sm = BehaviorStateMachine.from_dict(sm) if sm else None
         st.extra = d.get("extra", {})
@@ -164,6 +186,9 @@ class VisionEngine:
         st._scale = StabilizedMetric.from_config(self._filter_cfg)
         st._ear = StabilizedMetric.from_config(FilterConfig(ema_alpha=0.6, median_window=3))
         st._mar = StabilizedMetric.from_config(FilterConfig(ema_alpha=0.6, median_window=3))
+        st._pose_yaw = StabilizedMetric.from_config(self._filter_cfg)
+        st._pose_pitch = StabilizedMetric.from_config(self._filter_cfg)
+        st._pose_roll = StabilizedMetric.from_config(self._filter_cfg)
         st._sm = BehaviorStateMachine()
         return st
 
@@ -172,7 +197,14 @@ class VisionEngine:
         lm = self._extract(frame_bgr)
         pts = lm.pts if (lm and lm.ok) else None
         reason = "" if q.ok else (q.issues[0] if q.issues else "low_quality")
-        res = state._calibrator.feed(pts, q.ok and pts is not None, reason, t)
+        # V10: accumulate the frontal head-pose so overlay.pose is reported relative
+        # to the calibrated frontal. Pose needs the frame size + a face scale.
+        pose = None
+        if pts is not None and frame_bgr is not None and getattr(frame_bgr, "size", 0):
+            H, W = frame_bgr.shape[0], frame_bgr.shape[1]
+            face_px = float(lm.bbox[3]) if (lm and lm.bbox) else 0.0
+            pose = head_pose_from_landmarks(pts, W, H, face_px)
+        res = state._calibrator.feed(pts, q.ok and pts is not None, reason, t, pose=pose)
         if res.done and res.baseline is not None:
             state.baseline = res.baseline
             state.calibrated = True
@@ -265,6 +297,41 @@ class VisionEngine:
             return None
         return cv2.resize(crop, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
 
+    def _head_pose(self, state: SessionState, lm: Landmarks, W: int, H: int,
+                   *, mutate: bool) -> dict[str, float] | None:
+        """Head pose (overlay.pose) relative to the calibration frontal, smoothed.
+
+        Returns the CONTRACTS dict {yaw_deg,pitch_deg,roll_deg,depth,conf} or None
+        if the solve fails. Deltas are vs the calibrated frontal pose (0 = frontal).
+        depth = current face height / calibrated face height (reuses face_scale).
+        On the real path (mutate) the angles are EMA-smoothed via the session
+        filters; on variants we smooth on a copy-free direct value (no state write).
+        """
+        if lm.pts is None:
+            return None
+        face_px = float(lm.bbox[3]) if lm.bbox else 0.0
+        raw = head_pose_from_landmarks(lm.pts, W, H, face_px)
+        if raw is None:
+            return None
+        b = state.baseline
+        yaw = raw["yaw_deg"] - (b.pose_yaw0 if b else 0.0)
+        pitch = raw["pitch_deg"] - (b.pose_pitch0 if b else 0.0)
+        roll = raw["roll_deg"] - (b.pose_roll0 if b else 0.0)
+        if mutate and state._pose_yaw and state._pose_pitch and state._pose_roll:
+            yaw = state._pose_yaw.update(yaw).smoothed
+            pitch = state._pose_pitch.update(pitch).smoothed
+            roll = state._pose_roll.update(roll).smoothed
+        depth = 1.0
+        if b and b.face_px:
+            depth = round(face_px / float(b.face_px), 3) if face_px else 1.0
+        return {
+            "yaw_deg": round(float(yaw), 2),
+            "pitch_deg": round(float(pitch), 2),
+            "roll_deg": round(float(roll), 2),
+            "depth": float(depth),
+            "conf": float(raw["conf"]),
+        }
+
     def _analyze(self, state: SessionState, frame_bgr: np.ndarray, t: float,
                  *, mutate: bool, strict: bool = False) -> FrameResult:
         t0 = time.perf_counter()
@@ -310,6 +377,16 @@ class VisionEngine:
                 if metrics.mar is not None:
                     state._mar.update(metrics.mar)
             overlay = build_overlay(lm.pts, lm.bbox, W, H)
+            # V10 head pose for the web "posture doll": yaw/pitch (solvePnP) +
+            # eye-line roll, reported RELATIVE to the calibrated frontal and EMA-
+            # smoothed. On variants (mutate=False) we still compute a pose for
+            # display but do not update the session filters. If the solve fails or
+            # the face is bad, pose stays absent (web freezes the doll).
+            # NUNCHI_DISABLE_POSE=1 skips it (runtime A/B / load-shed switch, V11).
+            if overlay is not None and not pose_disabled():
+                pose = self._head_pose(state, lm, W, H, mutate=mutate)
+                if pose is not None:
+                    overlay["pose"] = pose
 
         # V3 behaviour state machine: only on the real analyze path (not variants).
         # Blinks/yawns read the RAW fast EAR/MAR so a brief closure isn't smoothed

@@ -28,17 +28,26 @@ class Baseline:
     pitch_frontal: float            # median pitch proxy when looking straight
     roll_zero: float                # median roll (deg) — usually ~0
     samples: int = 0
+    # V10 head-pose baseline (solvePnP yaw/pitch + eye-line roll) at frontal.
+    # overlay.pose is reported RELATIVE to these (0 = calibrated frontal).
+    pose_yaw0: float = 0.0
+    pose_pitch0: float = 0.0
+    pose_roll0: float = 0.0
 
     def to_dict(self) -> dict:
         return {"ear_open": self.ear_open, "ear_p10": self.ear_p10, "mar_rest": self.mar_rest,
                 "face_px": self.face_px, "pitch_frontal": self.pitch_frontal,
-                "roll_zero": self.roll_zero, "samples": self.samples}
+                "roll_zero": self.roll_zero, "samples": self.samples,
+                "pose_yaw0": self.pose_yaw0, "pose_pitch0": self.pose_pitch0,
+                "pose_roll0": self.pose_roll0}
 
     @classmethod
     def from_dict(cls, d: dict) -> Baseline:
         return cls(ear_open=d["ear_open"], ear_p10=d["ear_p10"], mar_rest=d["mar_rest"],
                    face_px=d["face_px"], pitch_frontal=d["pitch_frontal"],
-                   roll_zero=d["roll_zero"], samples=d.get("samples", 0))
+                   roll_zero=d["roll_zero"], samples=d.get("samples", 0),
+                   pose_yaw0=d.get("pose_yaw0", 0.0), pose_pitch0=d.get("pose_pitch0", 0.0),
+                   pose_roll0=d.get("pose_roll0", 0.0))
 
 
 @dataclass
@@ -76,16 +85,26 @@ class Calibrator:
     _face_px: list[float] = field(default_factory=list)
     _pitch: list[float] = field(default_factory=list)
     _roll: list[float] = field(default_factory=list)
+    _pose_yaw: list[float] = field(default_factory=list)
+    _pose_pitch: list[float] = field(default_factory=list)
+    _pose_roll: list[float] = field(default_factory=list)
     _t_start: float | None = None
     _t_last: float | None = None
 
     def reset(self) -> None:
         self._ears.clear(); self._mars.clear(); self._face_px.clear()
         self._pitch.clear(); self._roll.clear()
+        self._pose_yaw.clear(); self._pose_pitch.clear(); self._pose_roll.clear()
         self._t_start = None; self._t_last = None
 
-    def feed(self, pts: np.ndarray | None, quality_ok: bool, quality_reason: str, t: float) -> CalibrationResult:
-        """Feed one calibration frame. ``pts`` None or bad quality -> rejected (retryable)."""
+    def feed(self, pts: np.ndarray | None, quality_ok: bool, quality_reason: str, t: float,
+             pose: dict | None = None) -> CalibrationResult:
+        """Feed one calibration frame. ``pts`` None or bad quality -> rejected (retryable).
+
+        ``pose`` (optional) is the raw per-frame head pose dict (V10) from
+        ``headpose.head_pose_from_landmarks``; its yaw/pitch/roll form the frontal
+        pose baseline used to report ``overlay.pose`` as a relative value.
+        """
         if pts is None:
             return CalibrationResult(ok_frame=False, reason=quality_reason or "no_face",
                                      progress=self._progress(t), seconds_collected=self._elapsed(t))
@@ -102,6 +121,10 @@ class Calibrator:
         self._face_px.append(M.face_height(pts))
         self._pitch.append(M.pitch_proxy(pts))
         self._roll.append(roll)
+        if pose is not None:
+            self._pose_yaw.append(float(pose.get("yaw_deg", 0.0)))
+            self._pose_pitch.append(float(pose.get("pitch_deg", 0.0)))
+            self._pose_roll.append(float(pose.get("roll_deg", 0.0)))
 
         progress = self._progress(t)
         if progress >= 1.0 and len(self._ears) >= self.min_samples:
@@ -130,6 +153,9 @@ class Calibrator:
             pitch_frontal=round(statistics.median(self._pitch), 4),
             roll_zero=round(statistics.median(self._roll), 2),
             samples=len(self._ears),
+            pose_yaw0=round(statistics.median(self._pose_yaw), 2) if self._pose_yaw else 0.0,
+            pose_pitch0=round(statistics.median(self._pose_pitch), 2) if self._pose_pitch else 0.0,
+            pose_roll0=round(statistics.median(self._pose_roll), 2) if self._pose_roll else 0.0,
         )
 
     def to_dict(self) -> dict:
@@ -141,6 +167,9 @@ class Calibrator:
             "face_px": [round(x, 3) for x in self._face_px],
             "pitch": [round(x, 5) for x in self._pitch],
             "roll": [round(x, 3) for x in self._roll],
+            "pose_yaw": [round(x, 3) for x in self._pose_yaw],
+            "pose_pitch": [round(x, 3) for x in self._pose_pitch],
+            "pose_roll": [round(x, 3) for x in self._pose_roll],
             "t_start": self._t_start, "t_last": self._t_last,
         }
 
@@ -152,6 +181,9 @@ class Calibrator:
         c._face_px = list(d.get("face_px", []))
         c._pitch = list(d.get("pitch", []))
         c._roll = list(d.get("roll", []))
+        c._pose_yaw = list(d.get("pose_yaw", []))
+        c._pose_pitch = list(d.get("pose_pitch", []))
+        c._pose_roll = list(d.get("pose_roll", []))
         c._t_start = d.get("t_start")
         c._t_last = d.get("t_last")
         return c

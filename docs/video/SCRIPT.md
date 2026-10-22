@@ -17,6 +17,9 @@ user-presence shots (clearly marked **[USER]**).
   clips** — if mentioned at all, say exactly that; never claim it works well.
 - Graviton latency/cold-start is `[PENDING]`; the only latency we may state is the local
   Apple-Silicon dev number, and only if labelled as such.
+- The **posture buddy** moves from the pose **angle numbers only** (`overlay.pose`): say it
+  uses angle numbers (no image), that movement is exaggerated ~1.5× for readability, and that
+  shoulders/torso are **not** estimated (head only). Never imply it measures the body.
 
 Legend: **[USER]** = optional on-camera/voice by the user (they decide — U5). **[SCREEN]** =
 screen capture (demo or local-live, fake camera). **[DIAGRAM]** = architecture diagram
@@ -48,7 +51,7 @@ KO 메모: 시작 화면의 동의 문구와 Privacy 모달을 함께 보여 줌
 Sources: consent copy in `web/i18n.js`; no-persist test `tests/test_no_persist.py`
 (referenced in `docs/CONTRACTS.md` §3); privacy modal.
 
-## Section 3 — Live demo: calibrate → overlay → nudge · ~60 s · [SCREEN]
+## Section 3 — Live demo: calibrate → overlay → nudge · ~55 s · [SCREEN]
 **Narration (EN):**
 > "Pick Live mode, allow the camera, and it spends five seconds learning your neutral
 > posture. Then it runs. Turn on 'what OpenCV sees' and you get the face box and landmark
@@ -62,7 +65,7 @@ KO 메모: 모드 선택(`live-02`) → 보정(`demo-02`) → 오버레이(`demo
 Sources: overlay = `web/overlay.js` (coords only); nudge cap = `web/app.js` (MAX_TOASTS=2);
 toast behaviour verified in `docs/eval/WEB_E2E.md`.
 
-## Section 4 — What OpenCV 5 actually does · ~40 s · [SCREEN/DIAGRAM]
+## Section 4 — What OpenCV 5 actually does · ~35 s · [SCREEN/DIAGRAM]
 **Narration (EN):**
 > "Under the overlay, OpenCV 5 runs the whole vision path: it detects the face, finds
 > landmarks, and derives three signals — eye-openness, head tilt, and how close you are.
@@ -76,7 +79,7 @@ Sources: `nunchi.vision` (face detect, landmarks, metrics, quality, `analyze_var
 `docs/report/TECHNICAL_REPORT.md` §4; OpenCV pinned `opencv-python-headless==5.0.0.93`.
 [PENDING: per-behaviour P/R/F1 — unmeasured in `docs/eval/VISION_EVAL.md`; do not claim accuracy.]
 
-## Section 5 — The agent: when the view changes the decision · ~50 s · [SCREEN]
+## Section 5 — The agent: when the view changes the decision · ~45 s · [SCREEN]
 **Narration (EN):**
 > "This is the Agentic Vision part. The coach doesn't act on a single frame. When it's
 > uncertain, it asks OpenCV to look again — and that result changes the plan. If the second
@@ -91,18 +94,41 @@ Sources: `docs/submission/AGENTIC_VISION.md` C1/C2/C3, traces
 `second_look_quality_cleared`, `low_conf_ask_confirmation`, `guardrail_blocks_action`;
 guardrails `src/nunchi/agent/guardrails.py`.
 
-## Section 6 — AWS architecture · ~25 s · [DIAGRAM]
+## Section 6 — The posture buddy: see yourself in numbers · ~40 s · [SCREEN]
+**Narration (EN):**
+> "All of this is easy to feel, not just read. Meet the posture buddy — a soft stand-in that
+> moves from the angle numbers alone, no image. Tilt your head and it tilts; lean in and it
+> leans forward. Spin it to the side and the forward-head creep is obvious. Turn on the
+> good-posture ghost — the faint sky-blue outline — to compare. And scrub the timeline to
+> replay the session and see exactly when your head crept forward. It uses angle numbers
+> only, movement is exaggerated about 1.5× so it's easy to read, and it does not estimate
+> your shoulders or torso — head only. When tracking is unsure it just holds still and says so."
+
+KO 메모: 인형이 고개 기울임·앞으로 나옴을 따라 움직임 → Side로 돌려 거북목 → 고스트(연한 하늘색 윤곽) 비교 →
+되감기 슬라이더로 "이때부터 앞으로" 보기. 정직 표기(각도 숫자만·1.5배 과장·어깨/몸통 추정 안 함)는 화면 자막으로도.
+데모 모드 인형 재생은 자동 녹화(`record_demo.mjs`), 실제 웹캠 인형 짧은 클립은 **[USER]** 녹화(선택).
+[SCREEN] `w10-buddy-forward.png` → `w10-buddy-side-ghost.png` → `w10-buddy-unsure.png` →
+`w10-buddy-rewind.png` (or motion from `record_demo.mjs`, buddy panel in view).
+Sources: `docs/CONTRACTS.md` `overlay.pose` (yaw/pitch/roll/depth/conf, numbers only, head
+only — no shoulder/torso); head pose via solvePnP in `nunchi.vision` (V10); shoulders
+deferred per `docs/eval/BODY_POSE_FEASIBILITY.md`; buddy UI in `web/buddy.js`.
+
+## Section 7 — AWS architecture · ~20 s · [DIAGRAM]
 **Narration (EN):**
 > "It runs on AWS: OpenCV 5 inside a single Lambda on arm64 Graviton, Python 3.12, with a
 > hard concurrency cap of five as a cost and blast-radius ceiling. Session state lives in
 > DynamoDB with a 24-hour expiry, not in Lambda memory. Frames are never written to disk,
-> S3, or logs."
+> S3, or logs. On Graviton a frame's analysis takes roughly 0.2 to 0.3 seconds — plenty for
+> the two frames a second we send — though exact timing varies by host."
 
 KO 메모: 지휘자 제공 아키텍처 다이어그램 자리(없으면 자리표시자). 수치는 템플릿 기준(1536MB/15s/동시성5).
+지연은 단일 값을 약속하지 말고 범위("약 0.2~0.3초, 2fps에 충분")로 말함(LATENCY.md, 호스트별 변동).
 [DIAGRAM] architecture placeholder (conductor) + `demo-08-privacy.png` as the trust beat.
-Sources: `docs/report/TECHNICAL_REPORT.md` §3/§5; `cloud/template.yaml`.
+Sources: `docs/report/TECHNICAL_REPORT.md` §3/§5; `cloud/template.yaml`; latency range
+(server-side engine) `docs/cloud/LATENCY.md`.
+[PENDING: Graviton cold-start (~2.5 s Init) and client RTT — state only if spoken, from LATENCY.md.]
 
-## Section 7 — Evaluation & honest limits (incl. a failure) · ~30 s · [SCREEN]
+## Section 8 — Evaluation & honest limits (incl. a failure) · ~30 s · [SCREEN]
 **Narration (EN):**
 > "We don't hide the limits. The agent passes twenty-two deterministic scenarios and nine
 > adversarial ones — and we left one scenario failing on purpose, because the bug was in
@@ -116,7 +142,7 @@ KO 메모: 실패 장면 = 어두운 환경 품질 경고 → second_look 미해
 Sources: `docs/eval/AGENT_EVAL.md` (22 deterministic 100%, 9 adversarial 8/9, 1 intentional
 FAIL); limits in `docs/submission/AGENTIC_VISION.md` §5; failure path 1c/1a.
 
-## Section 8 — Close · ~15 s · [USER] optional
+## Section 9 — Close · ~15 s · [USER] optional
 **Narration (EN):**
 > "Nunchikochi — OpenCV 5 that sees, an agent that decides with you, on AWS, with your
 > frames never kept. Thanks for watching."
@@ -127,31 +153,35 @@ Sources: report screen.
 
 ---
 
-## Timing budget (target 4:30, cap 5:00)
+## Timing budget (target 4:55, cap 5:00)
 
 | § | beat | target | cumulative |
 |---|---|---|---|
 | 1 | problem / who | 0:30 | 0:30 |
 | 2 | app + privacy | 0:30 | 1:00 |
-| 3 | live demo | 1:00 | 2:00 |
-| 4 | OpenCV 5 | 0:40 | 2:40 |
-| 5 | agent | 0:50 | 3:30 |
-| 6 | AWS | 0:25 | 3:55 |
-| 7 | eval + failure | 0:30 | 4:25 |
-| 8 | close | 0:15 | 4:40 |
+| 3 | live demo | 0:55 | 1:55 |
+| 4 | OpenCV 5 | 0:35 | 2:30 |
+| 5 | agent | 0:45 | 3:15 |
+| 6 | posture buddy | 0:40 | 3:55 |
+| 7 | AWS | 0:20 | 4:15 |
+| 8 | eval + failure | 0:30 | 4:45 |
+| 9 | close | 0:10 | 4:55 |
 
-Buffer 0:20 under the 5:00 cap. If over, trim §4 and §6 first (they are the most
-diagram-heavy and least narrative).
+Buffer 0:05 under the 5:00 cap. If over, trim §4 and §7 first (most diagram-heavy, least
+narrative) — **never** trim the failure path (§8) or the honest-limits lines (incl. the
+buddy's "angle numbers only / ~1.5× / head only" note).
 
 ## Submission requirement checklist (map to beats)
-- **Team / people**: §1 and §8 [USER] shots (user decides per U5).
-- **App**: §2, §3 (screen captures / live).
-- **Architecture**: §6 (+ §4 OpenCV path).
-- **Results**: §7 (eval, honest limits incl. a failure).
+- **Team / people**: §1 and §9 [USER] shots (user decides per U5).
+- **App**: §2, §3 (screen captures / live), §6 (posture buddy).
+- **Architecture**: §7 (+ §4 OpenCV path).
+- **Results**: §8 (eval, honest limits incl. a failure).
 - Public/unlisted upload per `USER_RECORDING_GUIDE.md`.
 
 ## [PENDING] items to resolve before final cut
-- `[PENDING]` Graviton `analyze` latency & cold-start (C3/U6 deploy) — only if a latency
-  number is spoken.
+- Graviton `analyze` latency is now **measured** (`docs/cloud/LATENCY.md`: server-side engine
+  median ~148 ms); the script states it as a **range** ("~0.2–0.3 s, enough for 2 fps"), not a
+  single promised number, since host/network timing varies. Cold-start (~2.5 s Init) and
+  client RTT stay `[PENDING]` — mention only if spoken, sourced from LATENCY.md.
 - `[PENDING]` per-behaviour vision accuracy — **not** to be spoken; kept out of the script.
 - Architecture diagram asset from the conductor (placeholder until delivered).

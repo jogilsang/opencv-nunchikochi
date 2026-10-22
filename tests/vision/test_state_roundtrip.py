@@ -113,7 +113,10 @@ def test_from_dict_tolerates_missing_optional(engine: VisionEngine):
     assert st.baseline is None and st.calibrated is False
 
 
-# -- error: a pre-V6 (schema 1.0) blob is rejected (roll-aligned EAR change) ---
+# -- error: pre-V10 blobs (schema 1.0 / 2.0) are rejected ---------------------
+# V6 bumped schema to 2.0 (roll-aligned EAR); V10 bumped to 3.0 (head-pose
+# baseline). An older persisted blob lacks the current reference, so from_dict
+# must reject it (the session re-calibrates).
 def test_from_dict_rejects_old_schema(engine: VisionEngine, sample_images):
     import pytest
     frames = _frames(sample_images)
@@ -121,7 +124,9 @@ def test_from_dict_rejects_old_schema(engine: VisionEngine, sample_images):
     for i in range(20):
         engine.calibrate(st, frames[0], t=i * 0.3)
     d = st.to_dict()
-    assert d["schema"] == "2.0"                 # V6 bumped the schema
-    d["schema"] = "1.0"                         # simulate a pre-V6 persisted blob
-    with pytest.raises(ValueError):
-        SessionState.from_dict(d)
+    assert d["schema"] == "3.0"                 # V10 current schema
+    for old in ("1.0", "2.0"):                  # every pre-V10 schema is rejected
+        stale = dict(d)
+        stale["schema"] = old
+        with pytest.raises(ValueError):
+            SessionState.from_dict(stale)

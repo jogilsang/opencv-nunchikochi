@@ -90,13 +90,18 @@ if [ "$APPLY" = "1" ]; then
     --query "Stacks[0].Outputs[?OutputKey=='ApiBase'].OutputValue" --output text)
   "${AWS[@]}" s3 sync web/ "s3://$WEB_BUCKET/" \
     --exclude "config.json" --exclude "config.example.json" --exclude "*.md"
+  # Write config.json (apiBase only, NO key) and upload it explicitly. The sync above
+  # excludes config.json so a stale/committed copy never overwrites the stack value; we
+  # must upload the freshly-generated one here or the web app has no service address.
   printf '{\n  "apiBase": "%s"\n}\n' "$API_BASE" > web/config.json
-  echo "  wrote web/config.json  apiBase=$API_BASE"
+  "${AWS[@]}" s3 cp web/config.json "s3://$WEB_BUCKET/config.json" --content-type "application/json"
+  echo "  wrote + uploaded web/config.json  apiBase=$API_BASE"
   echo "  NOTE: set the X-Api-Key in the browser/app config manually — it is in SSM ($API_KEY_PARAM), not in config.json."
 else
   echo "  \$ ${AWS[*]} cloudformation describe-stacks --stack-name $STACK --query \"Stacks[0].Outputs\""
   echo "  \$ ${AWS[*]} s3 sync web/ s3://<WebBucket>/ --exclude config.json --exclude '*.md'"
-  echo "  (config.json would be written with apiBase from the ApiBase output; X-Api-Key stays in SSM)"
+  echo "  \$ ${AWS[*]} s3 cp web/config.json s3://<WebBucket>/config.json --content-type application/json"
+  echo "  (config.json is written with apiBase from the ApiBase output and uploaded explicitly; X-Api-Key stays in SSM)"
 fi
 
 echo "== done (apply=$APPLY) =="

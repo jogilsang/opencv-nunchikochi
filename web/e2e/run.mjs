@@ -65,6 +65,10 @@ async function main() {
       "--use-fake-ui-for-media-stream",
       "--use-fake-device-for-media-stream",
       "--autoplay-policy=no-user-gesture-required",
+      // software GL so the WebGL posture buddy (W10) renders headlessly without a GPU
+      "--use-gl=swiftshader",
+      "--enable-webgl",
+      "--ignore-gpu-blocklist",
     ],
   });
   const desktop = await browser.newContext({ viewport: { width: 1280, height: 860 } });
@@ -211,6 +215,117 @@ async function main() {
       assert(!/secret-not-a-real-key/.test(leak.url), "key leaked to URL");
     });
     await page.close();
+  }
+
+  // ---- 3c. posture buddy (W10): 3D view, pose, rotation, ghost, low-conf, rewind ----
+  group("posture buddy (W10)");
+  {
+    const page = await desktop.newPage();
+    const pageErrors = [];
+    page.on("pageerror", (e) => pageErrors.push(String(e)));
+    await startDemoToRun(page);
+    await check("buddy canvas present with role=img", async () => {
+      assert(await page.isVisible("#buddy-canvas"), "buddy canvas hidden");
+      assert((await page.getAttribute("#buddy-canvas", "role")) === "img", "role!=img");
+    });
+    await check("buddy initializes (3D or graceful 2D) and records a pose track", async () => {
+      await page.waitForFunction(() => window.__nunchi && window.__nunchi.buddyReady(), null, { timeout: 6000 });
+      await page.waitForFunction(() => window.__nunchi.poseTrackLen() >= 3, null, { timeout: 6000 });
+      const ex = await page.evaluate(() => window.__nunchi.buddyExaggeration());
+      assert(ex === 1.5, `exaggeration ${ex} != 1.5`);
+    });
+    await check("rewind timeline appears and scrubbing replays a pose", async () => {
+      // assert this early, while demo is still on the run screen (demo auto-ends after ~6.5s)
+      await page.waitForSelector("#buddy-rewind:not([hidden])", { timeout: 8000 });
+      const slider = page.locator("#rewind-slider");
+      await slider.evaluate((el) => { el.value = "20"; el.dispatchEvent(new Event("input")); });
+      await page.waitForTimeout(150);
+      const time = await page.textContent("#rewind-time");
+      assert(time && /\d/.test(time), `rewind time not shown: ${time}`);
+    });
+    await check("exaggeration note is shown (honest '~1.5x' label)", async () =>
+      assert(await page.isVisible("#buddy-exag"), "exaggeration label hidden"));
+    await check("forward-head pose updates aria-label + visible state", async () => {
+      await page.evaluate(() => window.__nunchi.setBuddyPose({ yaw_deg: 0, pitch_deg: 15, roll_deg: 1, depth: 1.3, conf: 0.95 }));
+      await page.waitForTimeout(300);
+      const aria = await page.getAttribute("#buddy-canvas", "aria-label");
+      assert(/forward|앞으로|chin|숙/i.test(aria), `aria not descriptive: ${aria}`);
+      const state = await page.textContent("#buddy-state");
+      assert(state && state.trim().length > 0, "visible buddy state empty");
+    });
+    await check("low confidence holds still and shows 'tracking unsure'", async () => {
+      await page.evaluate(() => window.__nunchi.setBuddyPose({ yaw_deg: 0, pitch_deg: 8, roll_deg: 0, depth: 1.1, conf: 0.3 }));
+      await page.waitForTimeout(250);
+      assert(!(await page.locator("#buddy-unsure").evaluate((el) => el.hidden)), "unsure badge hidden on low conf");
+    });
+    await check("view presets + ghost toggle work without errors", async () => {
+      for (const id of ["#buddy-front", "#buddy-side", "#buddy-top", "#buddy-reset"]) await page.click(id);
+      await page.check("#buddy-ghost");
+      await page.waitForTimeout(100);
+      assert(await page.locator("#buddy-ghost").isChecked(), "ghost not checked");
+      await page.uncheck("#buddy-ghost");
+    });
+    await check("keyboard rotates the buddy (ArrowRight / Home)", async () => {
+      await page.focus("#buddy-canvas");
+      await page.keyboard.press("ArrowRight");
+      await page.keyboard.press("Home");
+      // no throw == pass; also confirm canvas stayed focusable
+      assert((await page.evaluate(() => document.activeElement?.id)) === "buddy-canvas", "canvas lost focus");
+    });
+    await check("report screen shows a rewind buddy built from the track", async () => {
+      if ((await screen(page)) === "screen-run") await page.click("#btn-end");
+      await waitScreen(page, "screen-report", 15000);
+      await page.waitForFunction(() => window.__nunchi.reportBuddyReady(), null, { timeout: 6000 });
+      assert(await page.isVisible("#report-buddy-canvas"), "report buddy canvas hidden");
+      await page.evaluate(() => window.__nunchi.rewindScrub(0.8));
+      await page.waitForTimeout(150);
+      const st = await page.evaluate(() => window.__nunchi.rewindState());
+      assert(typeof st === "string", "rewind state missing");
+    });
+    await check("no uncaught page errors across the buddy flow", async () =>
+      assert(pageErrors.length === 0, `page errors: ${pageErrors.join(" | ")}`));
+    await page.close();
+  }
+
+  // ---- 3d. W11: demo strip never covers buddy content (390px + 320px panel) ----
+  group("demo strip (W11)");
+  {
+    for (const [label, vp] of [["mobile 390px", { width: 390, height: 780 }], ["narrow 360px", { width: 360, height: 760 }]]) {
+      const ctx = await browser.newContext({ viewport: vp, isMobile: vp.width <= 400 });
+      const page = await ctx.newPage();
+      await startDemoToRun(page);
+      await check(`${label}: demo strip visible and full-width at the bottom`, async () => {
+        assert(await page.isVisible("#demo-corner"), "demo strip hidden");
+        const box = await page.locator("#demo-corner").boundingBox();
+        assert(box, "no demo strip box");
+        // full-width bottom strip: spans the viewport and sits at the bottom edge
+        assert(box.width >= vp.width - 2, `strip not full width: ${box.width} < ${vp.width}`);
+        assert(box.y + box.height >= vp.height - 2, `strip not at bottom: ${box.y + box.height}`);
+      });
+      await check(`${label}: demo strip does not overlap the buddy rewind hint`, async () => {
+        // reveal the rewind timeline first (needs a few pose samples)
+        await page.waitForSelector("#buddy-rewind:not([hidden])", { timeout: 8000 });
+        const strip = await page.locator("#demo-corner").boundingBox();
+        for (const sel of ["#buddy-state", ".buddy-rotate-hint", "#rewind-time"]) {
+          const el = page.locator(sel).first();
+          if (!(await el.count())) continue;
+          const b = await el.boundingBox();
+          if (!b || !strip) continue;
+          const overlapY = Math.max(0, Math.min(b.y + b.height, strip.y + strip.height) - Math.max(b.y, strip.y));
+          assert(overlapY === 0, `${sel} overlapped by demo strip (${overlapY}px)`);
+        }
+      });
+      await check(`${label}: demo strip text is not clipped`, async () => {
+        // full-width strip must show the whole phrase (no ellipsis truncation)
+        const clipped = await page.locator("#demo-corner").evaluate((el) => {
+          const span = el.querySelector("span");
+          return span ? span.scrollWidth - span.clientWidth > 2 : false;
+        });
+        assert(!clipped, "demo strip text is clipped");
+      });
+      await page.close();
+      await ctx.close();
+    }
   }
 
   // ---- 4. error states (>= 3 kinds) ----

@@ -4,6 +4,10 @@ Contract (CONTRACTS §1): coordinates only, 0-1 normalised to the analysed frame
 no pixels, never persisted/traced. We export a small, fixed set (<=20 points) —
 the 5 YuNet-style key points plus a sparse eye/mouth contour — not the raw 478
 mesh points. Web handles mirroring and scaling.
+
+The head-pose block (``overlay["pose"]`` = yaw/pitch/roll/depth/conf for the web
+posture doll, V10) is MERGED IN BY THE ENGINE after this builder — it is numbers,
+not coordinate points, so it is not counted against ``MAX_OVERLAY_POINTS``.
 """
 from __future__ import annotations
 

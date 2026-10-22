@@ -67,6 +67,8 @@ async function main() {
     browser = await chromium.launch({ headless: true, args: [
       "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream",
       "--autoplay-policy=no-user-gesture-required",
+      // software WebGL so the posture buddy (W10) renders in 3D during the recording
+      "--use-gl=swiftshader", "--enable-webgl", "--ignore-gpu-blocklist",
     ] });
     const ctx = await browser.newContext({
       viewport: { width: 1280, height: 800 },
@@ -99,11 +101,47 @@ async function main() {
 
     // calibrate -> run
     await waitScreen(page, "screen-run", 20000);
-    // beat: let the run play — overlay, metrics, nudges accrue (demo auto-fires)
-    await page.waitForTimeout(6000);
-    // beat: open the agent panel to show the perceive->decide->act evidence
-    await page.click("#btn-agent").catch(() => {});
-    await page.waitForTimeout(3500);
+    // beat: let the run play briefly — overlay, metrics, nudges accrue (demo auto-fires).
+    // Kept short because the recorded demo auto-ends after its steps; the buddy beat below
+    // needs to happen while still on the run screen.
+    await page.waitForTimeout(2500);
+
+    // beat: the posture buddy (W10) — demo mode only, numbers-only, no fake camera.
+    // Scroll it into view and drive a short tilt → forward → side+ghost → rewind sequence
+    // so the recording shows the buddy motion for SCRIPT §6 / SHOTLIST scene 6.
+    const onRun = async () => (await page.evaluate(() => window.__nunchi && window.__nunchi.screen)) === "screen-run";
+    const hasBuddy = await page.evaluate(() => !!(window.__nunchi && window.__nunchi.buddyReady && window.__nunchi.buddyReady()));
+    if (hasBuddy && await onRun()) {
+      await page.locator("#buddy-wrap").scrollIntoViewIfNeeded().catch(() => {});
+      await page.waitForTimeout(600);
+      // head tilt, then forward-head (buddy mirrors the angle numbers)
+      await page.evaluate(() => window.__nunchi.setBuddyPose({ yaw_deg: 3, pitch_deg: 2, roll_deg: 12, depth: 1.02, conf: 0.96 }));
+      await page.waitForTimeout(1300);
+      await page.evaluate(() => window.__nunchi.setBuddyPose({ yaw_deg: 1, pitch_deg: 15, roll_deg: 2, depth: 1.33, conf: 0.95 }));
+      await page.waitForTimeout(1500);
+      // spin to the side and show the good-posture ghost
+      await page.evaluate(() => window.__nunchi.buddySetView(70, 0));
+      await page.check("#buddy-ghost").catch(() => {});
+      await page.waitForTimeout(1800);
+      await page.uncheck("#buddy-ghost").catch(() => {});
+      await page.evaluate(() => window.__nunchi.buddySetView(0, 0));
+      // rewind: scrub the in-memory timeline (reveal it first)
+      await page.waitForSelector("#buddy-rewind:not([hidden])", { timeout: 6000 }).catch(() => {});
+      const rw = page.locator("#rewind-slider");
+      if (await rw.count()) {
+        for (const v of [60, 30, 85]) {
+          await rw.evaluate((el, val) => { el.value = String(val); el.dispatchEvent(new Event("input")); }, v).catch(() => {});
+          await page.waitForTimeout(600);
+        }
+        await page.locator("#rewind-live").click().catch(() => {});
+      }
+      await page.waitForTimeout(500);
+    } else {
+      log("buddy not ready or demo already ended — skipping buddy beat (rest still recorded)");
+    }
+
+    // beat: open the agent panel to show the perceive->decide->act evidence (if still on run)
+    if (await onRun()) { await page.click("#btn-agent").catch(() => {}); await page.waitForTimeout(3000); }
     // end -> report
     if ((await page.evaluate(() => window.__nunchi.screen)) === "screen-run") {
       await page.click("#btn-end").catch(() => {});

@@ -2,7 +2,7 @@
 
 *A calm desk coach that reads posture and fatigue cues with OpenCV 5 and lets an agent decide whether to nudge, stay quiet, or look again. Built for the OpenCV AI Competition 2026.*
 
-Your browser webcam sends a small JPEG about twice a second. An AWS Lambda function on **arm64 (Graviton)** decodes it in memory, runs **OpenCV 5** (`cv2.dnn` ONNX models: face detection, 478-point face mesh, palm detection), turns the result into behaviours (head tilt, forward head, away, blink, yawn, drink), and a small **agent** decides what to do. **Frames are never stored**: they are analysed in memory and discarded; only aggregates and filter state (<= 8 KB, 24 h TTL) are kept.
+Your browser webcam sends a small JPEG about twice a second. An AWS Lambda function on **arm64 (Graviton)** decodes it in memory, runs **OpenCV 5** (`cv2.dnn` ONNX models: face detection, 478-point face mesh, palm detection), turns the result into behaviours (head tilt, forward head, away, blink, yawn, drink) and a head-pose **posture buddy**, and a small **agent** decides what to do. **Frames are never stored**: they are analysed in memory and discarded; only aggregates and filter state (<= 8 KB, 24 h TTL) are kept.
 
 ![Architecture](docs/diagrams/aws_architecture.png)
 
@@ -31,7 +31,7 @@ Details, prerequisites and the AWS deployment procedure: [`docs/REPRODUCE.md`](d
 
 | path | what |
 |---|---|
-| `src/nunchi/vision` | OpenCV 5 pipeline: YuNet face detection, FaceMesh landmarks, quality checks, calibration, behaviour state machines, palm detector |
+| `src/nunchi/vision` | OpenCV 5 pipeline: YuNet face detection, FaceMesh landmarks, quality checks, calibration, behaviour state machines, palm detector, head pose (`solvePnP`) for the posture buddy |
 | `src/nunchi/agent` | decision loop, tools (`second_look` etc.), guardrails, optional Bedrock planner, image-free trace |
 | `src/nunchi/service` | FastAPI service (HTTP API in `docs/CONTRACTS.md`), session state, metrics, rate limits |
 | `web/` | static web app (Demo/Live modes, overlay, agent panel, report), Playwright e2e |
@@ -42,10 +42,11 @@ Details, prerequisites and the AWS deployment procedure: [`docs/REPRODUCE.md`](d
 
 ## Evaluation and honest limits
 
-- Tests: 266 passing (vision, agent, service, e2e, independent review); web e2e 27/27.
-- Measured on the deployed stack (Lambda arm64, 1536 MB): engine analysis **148 ms median / 157 ms p95** per frame, cold-start Init ~2.5 s ([`docs/cloud/LATENCY.md`](docs/cloud/LATENCY.md)).
+- Tests: 286 passing (vision, agent, service, e2e, independent review); web e2e 27/27.
+- Measured on the deployed stack (Lambda arm64, 1536 MB): engine analysis **~178–282 ms per frame depending on the execution host** (stable ~178 ms within one warm host), cold-start Init ~2.5 s. The 2× spread was A/B-isolated to host variance, not pose or threads ([`docs/cloud/LATENCY.md`](docs/cloud/LATENCY.md), [`docs/eval/LATENCY_REGRESSION.md`](docs/eval/LATENCY_REGRESSION.md)).
 - **Not yet measured**: per-behaviour accuracy on real recorded clips. Vision robustness numbers are from synthetic transforms and public sample images and must not be read as real-world accuracy ([`docs/eval/VISION_EVAL.md`](docs/eval/VISION_EVAL.md), [`docs/eval/VISION_ROBUSTNESS.md`](docs/eval/VISION_ROBUSTNESS.md)).
 - Blink counting is limited by ~2 fps sampling; we report an eyes-closed fraction instead. `drink` is implemented conservatively and unvalidated on real clips.
+- The posture buddy (head yaw/pitch/roll + depth via `cv2.solvePnP`) tracks **relative change from the calibrated pose, not absolute angles** (approximate intrinsics/3D model); on-screen motion is amplified ~1.5× for readability. Shoulder/body pose is deferred ([`docs/eval/BODY_POSE_FEASIBILITY.md`](docs/eval/BODY_POSE_FEASIBILITY.md)).
 - Agent evaluation uses deterministic stubs and scenarios written by us; failures are kept in the report.
 - Best Use of COOL is **not pursued** (COOL is an AWS Marketplace AMI; this service is a Lambda zip).
 

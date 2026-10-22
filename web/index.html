@@ -119,6 +119,52 @@
             </div>
             <p class="overlay-hint" data-i18n="overlayHint"></p>
             <p class="discard-note" data-i18n="discardNote"></p>
+
+            <!-- Posture buddy (W10): numbers-only 3D stand-in. role=img + live aria-label. -->
+            <div class="buddy-wrap" id="buddy-wrap">
+              <div class="buddy-head">
+                <h2 class="buddy-title" data-i18n="buddyTitle"></h2>
+                <p class="buddy-hint" data-i18n="buddyHint"></p>
+              </div>
+              <div class="buddy-stage">
+                <canvas id="buddy-canvas" class="buddy-canvas" width="320" height="300"
+                        tabindex="0" role="img" aria-label="Posture buddy"></canvas>
+                <span class="buddy-exag" id="buddy-exag" data-i18n="buddyExaggerated"></span>
+                <span class="buddy-unsure" id="buddy-unsure" hidden data-i18n="buddyUnsure"></span>
+              </div>
+              <p class="buddy-2dnote" id="buddy-2dnote" hidden data-i18n="buddy2dNote"></p>
+              <div class="buddy-controls">
+                <div class="buddy-views" role="group" aria-label="View">
+                  <button type="button" class="chip-btn" id="buddy-front" data-i18n="buddyViewFront"></button>
+                  <button type="button" class="chip-btn" id="buddy-side" data-i18n="buddyViewSide"></button>
+                  <button type="button" class="chip-btn" id="buddy-top" data-i18n="buddyViewTop"></button>
+                  <button type="button" class="chip-btn" id="buddy-reset" data-i18n="buddyReset"></button>
+                </div>
+                <label class="switch" for="buddy-ghost">
+                  <input type="checkbox" id="buddy-ghost" />
+                  <span data-i18n="buddyGhost"></span>
+                </label>
+              </div>
+              <p class="buddy-ghost-legend" data-i18n="buddyGhostLegend"></p>
+              <p class="buddy-rotate-hint" data-i18n="buddyRotateHint"></p>
+              <p class="buddy-state" id="buddy-state" role="status" aria-live="polite"></p>
+
+              <!-- Session rewind (W10 stage 2): replay the buddy from the in-memory pose track.
+                   Memory only — never saved/sent/URL'd. Forward-head spans are colour-marked. -->
+              <div class="buddy-rewind" id="buddy-rewind" hidden>
+                <div class="rewind-head">
+                  <span class="rewind-title" data-i18n="rewindTitle"></span>
+                  <button type="button" class="chip-btn" id="rewind-live" data-i18n="rewindLive"></button>
+                </div>
+                <div class="rewind-track" id="rewind-track">
+                  <canvas id="rewind-marks" class="rewind-marks" width="600" height="10" aria-hidden="true"></canvas>
+                  <input type="range" id="rewind-slider" min="0" max="100" value="100"
+                         step="1" aria-label="Session rewind" />
+                </div>
+                <p class="rewind-time" id="rewind-time" role="status" aria-live="polite"></p>
+              </div>
+            </div>
+
             <div class="btn-row" style="margin-top:12px">
               <button class="btn secondary" id="btn-end" type="button" data-i18n="endSession"></button>
               <button class="btn ghost" id="btn-agent" type="button" aria-expanded="false" aria-controls="agent-panel" data-i18n="agentOpen"></button>
@@ -195,6 +241,28 @@
           </table>
         </div>
 
+        <!-- Posture buddy rewind on the report (W10): replay this session from the
+             in-memory pose track. Shown only if we captured poses. -->
+        <div class="buddy-wrap" id="report-buddy-wrap" hidden>
+          <div class="buddy-head">
+            <h3 class="sub" data-i18n="rewindReportTitle"></h3>
+            <p class="buddy-hint" data-i18n="rewindReportHint"></p>
+          </div>
+          <div class="buddy-stage">
+            <canvas id="report-buddy-canvas" class="buddy-canvas" width="320" height="260"
+                    tabindex="0" role="img" aria-label="Posture buddy"></canvas>
+            <span class="buddy-exag" data-i18n="buddyExaggerated"></span>
+          </div>
+          <div class="buddy-rewind" id="report-rewind">
+            <div class="rewind-track" id="report-rewind-track">
+              <canvas id="report-rewind-marks" class="rewind-marks" width="600" height="10" aria-hidden="true"></canvas>
+              <input type="range" id="report-rewind-slider" min="0" max="100" value="0" step="1" aria-label="Session rewind" />
+            </div>
+            <p class="rewind-time" id="report-rewind-time" role="status" aria-live="polite"></p>
+          </div>
+          <p class="buddy-rotate-hint" data-i18n="buddyRotateHint"></p>
+        </div>
+
         <div class="btn-row" style="margin-top:18px">
           <button class="btn" id="btn-new" type="button" data-i18n="newSession"></button>
           <button class="btn secondary" id="btn-download" type="button" data-i18n="downloadCard"></button>
@@ -221,6 +289,7 @@
         <h3 class="sub" data-i18n="privacyStored"></h3>
         <p data-i18n="privacyStoredBody"></p>
         <p class="note" data-i18n="privacyNotDiag"></p>
+        <p class="note" data-i18n="buddyPrivacy"></p>
         <div class="btn-row" style="margin-top:14px">
           <button class="btn secondary" id="btn-privacy-delete" type="button" data-i18n="privacyDelete"></button>
         </div>

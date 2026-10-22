@@ -36,77 +36,84 @@ Pick Live mode, allow the camera,
 and it spends five seconds learning your neutral posture.
 
 9
-00:01:12,000 --> 00:01:28,000
+00:01:12,000 --> 00:01:25,000
 Then it runs. Turn on "what OpenCV sees" and you get
 the face box and landmark points — coordinates only, no image leaves the view.
 
 10
-00:01:28,000 --> 00:01:45,000
+00:01:25,000 --> 00:01:42,000
 Lean in and hold it, and a gentle nudge appears: sit back a little.
 
 11
-00:01:45,000 --> 00:02:00,000
+00:01:42,000 --> 00:01:55,000
 Two at most, so it never buries the live metrics.
 
 12
-00:02:00,000 --> 00:02:14,000
+00:01:55,000 --> 00:02:08,000
 Under the overlay, OpenCV 5 runs the whole vision path:
 it detects the face and finds landmarks.
 
 13
-00:02:14,000 --> 00:02:24,000
+00:02:08,000 --> 00:02:18,000
 It derives the signals — eye-openness, head tilt,
 and how close you are.
 
 14
-00:02:24,000 --> 00:02:40,000
+00:02:18,000 --> 00:02:30,000
 It also scores image quality, and when quality is poor
 it can take a second look before anyone is bothered.
 
 15
-00:02:40,000 --> 00:02:54,000
+00:02:30,000 --> 00:02:42,000
 This is the Agentic Vision part. The coach doesn't act on a single frame.
 
 16
-00:02:54,000 --> 00:03:08,000
+00:02:42,000 --> 00:02:52,000
 When it's uncertain, it asks OpenCV to look again —
 and that result changes the plan.
 
 17
-00:03:08,000 --> 00:03:22,000
+00:02:52,000 --> 00:03:05,000
 If the second look clears things up, it stays quiet.
 If it's still unsure, it asks you a yes or no.
 
 18
-00:03:22,000 --> 00:03:30,000
+00:03:05,000 --> 00:03:15,000
 You're always in control. Anything off-list the model suggests
 is rejected, and the rules decide instead.
 
 19
-00:03:30,000 --> 00:03:43,000
-It runs on AWS: OpenCV 5 inside a single Lambda on arm64 Graviton,
-with a hard concurrency cap of five.
+00:03:15,000 --> 00:03:27,000
+Meet the posture buddy — a soft stand-in that moves from the
+angle numbers alone, no image. Tilt your head and it tilts; lean in and it leans forward.
 
 20
-00:03:43,000 --> 00:03:55,000
-Session state lives in DynamoDB with a 24-hour expiry,
-and frames are never written to disk, S3, or logs.
+00:03:27,000 --> 00:03:42,000
+Spin it to the side and the forward-head creep is obvious.
+Turn on the good-posture ghost — the faint sky-blue outline — to compare.
 
 21
-00:03:55,000 --> 00:04:06,000
-We don't hide the limits. The agent passes twenty-two deterministic
-scenarios and nine adversarial ones.
+00:03:42,000 --> 00:03:55,000
+Scrub the timeline to see exactly when your head crept forward.
+Angle numbers only, exaggerated about 1.5× — and it doesn't estimate your shoulders, head only.
 
 22
-00:04:06,000 --> 00:04:14,000
-We left one failing on purpose — the bug was in the test, not the agent.
+00:03:55,000 --> 00:04:15,000
+It runs on AWS: OpenCV 5 in a single Lambda on arm64 Graviton,
+with a concurrency cap of five and state in DynamoDB for 24 hours — frames never stored.
+A frame analyses in roughly 0.2 to 0.3 seconds, enough for the two frames a second we send.
 
 23
-00:04:14,000 --> 00:04:30,000
+00:04:15,000 --> 00:04:30,000
+We don't hide the limits. The agent passes twenty-two deterministic
+scenarios and nine adversarial ones — one left failing on purpose, the bug was in the test.
+
+24
+00:04:30,000 --> 00:04:45,000
 Watch a real failure path: in a dark room the quality warning fires,
 the second look doesn't clear it, so instead of guessing it asks you.
 
-24
-00:04:30,000 --> 00:04:40,000
+25
+00:04:45,000 --> 00:04:55,000
 Nunchikochi — OpenCV 5 that sees, an agent that decides with you,
 on AWS, with your frames never kept. Thanks for watching.

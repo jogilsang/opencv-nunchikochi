@@ -15,6 +15,8 @@ class VisionEngine:
 def decode_jpeg(data: bytes, max_side: int = 640) -> np.ndarray  # 서비스가 사용. 디코드 후 원본 바이트는 즉시 폐기
 ```
 - `FrameResult.overlay`(선택): 화면 표시용 **좌표만**(0~1 정규화 얼굴 상자, 랜드마크 점, 어깨·손 점). 픽셀·영상은 아니며 저장·로그·trace 금지. 웹이 프리뷰 위에 그려서 "OpenCV가 무엇을 보고 있는지"를 보여 준다(심사자 이해·UX). 좌표계는 서버가 받은 프레임 기준이고 웹이 거울 반전·크기 변환을 한다.
+- `FrameResult.overlay.pose`(선택, **자세 인형용 숫자만**): `{"yaw_deg":float,"pitch_deg":float,"roll_deg":float,"depth":float,"conf":float}`.
+  각도는 **보정(calibration) 때의 정면 자세를 0으로 한 상대값**이며 사용자 본인 시점 기준이다: `yaw_deg>0` 사용자 오른쪽으로 고개를 돌림, `pitch_deg>0` 턱을 숙임(아래를 봄), `roll_deg>0` 사용자 오른쪽 어깨 쪽으로 기울임. `depth`는 보정 때 얼굴 크기 대비 비율(1.0=같은 거리, >1 화면에 더 가까움, 거북목·구부정의 근거). `conf`는 0~1 신뢰도(낮으면 웹은 인형을 고정하고 "추정 불안정" 표시). 값은 FaceMesh 3D 랜드마크와 OpenCV `solvePnP`로 계산한다(어깨·몸통은 추정하지 않음). 이 값은 trace·DB·로그에 남기지 않고, 웹 브라우저 메모리의 세션 되감기에서만 쓴다.
 - `analyze`는 **영상을 반환·저장·로그하지 않는다.** 예외는 삼키지 않고 `FrameResult.quality.issues`로 표현 가능한 건 표현하고, 나머지는 예외로 올린다.
 - `backend`는 런타임 증거로 채운다(`cv2.getBuildInformation()`·COOL 모듈 존재 확인), 설정값을 그대로 쓰지 않는다.
 - 필수 성능: Graviton Lambda 1 vCPU 상당에서 프레임당 **p95 < 250 ms** (최종 측정은 cloud 탭과 협업).

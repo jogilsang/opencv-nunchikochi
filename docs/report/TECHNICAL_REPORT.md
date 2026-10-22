@@ -113,6 +113,35 @@ all geometry/quality is OpenCV + NumPy.
   computed on a variant path, so `second_look`/`zoom_face` cannot fabricate a `drink`.
   The model is optional: if the file is absent, `drink_supported=False` and no `drink`
   is emitted (`src/nunchi/vision/engine.py`).
+- **Head pose (for the posture buddy, V10)**: `src/nunchi/vision/headpose.py` takes
+  **six Face Mesh points** (nose tip, chin, both outer eye corners, both mouth corners),
+  matches them to a generic 3D face model, and recovers head rotation with
+  **`cv2.solvePnP`** (`SOLVEPNP_ITERATIVE`). `yaw` and `pitch` come from the solve;
+  **`roll` is taken from the filtered eye-line metric, not from PnP**, because 6-point
+  PnP roll is very noise-sensitive (`docs/eval/VISION_EVAL.md` §6). `depth` is the face
+  size relative to the calibration baseline (>1 = closer to the screen). No image or raw
+  landmarks leave this step — it is pure geometry on coordinates.
+
+**Posture buddy (V10 feature, head only)**
+
+The web UI renders `overlay.pose` as a small pastel "clay" head avatar (no bones or
+skeleton) that mirrors the user's head yaw/pitch/roll and screen distance in real time,
+with a 3-axis view, a ghost of the calibrated frontal pose, and an in-browser session
+rewind (and a demo-mode replay), keyboard-accessible. It is driven **only by the five
+numbers** in `overlay.pose` (`yaw_deg/pitch_deg/roll_deg/depth/conf`); no image or raw
+landmark points are sent, and the pose track lives **only in browser memory** — it is
+not in DynamoDB, logs, or the trace (`docs/cloud/LATENCY.md` C10 re-verified this). The
+on-screen motion is amplified **~1.5×** so small changes are easy to read, and this is
+stated in the UI (`web/i18n.js buddyExaggerated`). Absolute angles are **not** claimed:
+the camera intrinsics and 3D model are approximations, so the buddy tracks **relative
+change from the calibrated frontal pose**, not true degrees. On a synthetic rotation
+test (`tests/vision/test_headpose.py`) noise-free recovery error is 0° and signs match
+the contract; with ±1.5 px landmark jitter the mean error is roughly yaw ~3–5°, pitch
+~5°, roll ~2–3° (`docs/eval/VISION_EVAL.md` §6). Body pose (shoulders/torso) is **not**
+implemented — the only Face-Mesh-free path (MediaPipe pose, two-stage) exceeds the ~8 MB
+model budget at fp32 (17.56 MB) and the int8 variant's `cv2.dnn` 5.0 load is unverified,
+so it is deferred (`docs/eval/BODY_POSE_FEASIBILITY.md`). Screenshots:
+`docs/screenshots/w10-buddy-*.png`.
 - **Primary-face selection** (`select_primary_face`, `docs/eval/VISION_ROBUSTNESS.md`
   §3): the largest face, tie-broken toward screen centre — deterministic — so a person
   walking past in the background cannot hijack the analysis.
@@ -142,9 +171,10 @@ local **Apple Silicon arm64** dev machine (explicitly **not** Graviton), the `an
 hot path is **median 12.69 ms / p95 13.69 ms, 78.82 fps, peak RSS 97.4 MB**; a normal
 frame on the V6 path is p95 ≈ 9.2 ms, and a small-face retry frame p95 ≈ 13.6 ms. All are
 under the 250 ms contract budget. On the deployed **AWS Graviton** Lambda (1536 MB) the
-measured engine time is **148 ms median / 157 ms p95** with a **2.5 s median cold-start
-Init** (`docs/cloud/LATENCY.md`, section 5); it is a different environment and not directly
-comparable to the laptop figure.
+measured engine time is **~178–282 ms depending on the execution host** (stable within one
+warm host at ~178 ms; see §5 and `docs/eval/LATENCY_REGRESSION.md`) with a **~2.5 s median
+cold-start Init**; it is a different environment and not directly comparable to the laptop
+figure.
 
 ## 5. AWS deployment
 
@@ -179,15 +209,24 @@ The core workload runs on AWS; the browser only captures and displays
 **Estimated cost** at demo scale (~50k frame invocations/month): Lambda ≈ $0.30,
 DynamoDB ≈ $0.20, CloudFront ≈ $0.50, S3 ≈ $0.05, CloudWatch ≈ $0.50 → **≈ $1–2 / month**,
 idle ≈ $0 (all usage-priced, no NAT, no provisioned capacity) (`cloud/README.md`). The
-$20 budget alarm is the backstop. **Measured on the deployed stack** (AWS Lambda arm64 / Graviton, 1536 MB, us-east-1,
-2026-10-22; `docs/cloud/LATENCY.md`): the engine's per-frame analysis time is
-**148 ms median / 157 ms p95** (100 warm frames, 320x240 JPEG, one face); a forced cold
-start costs **2.5 s median Init** (n=5, models load once at init) plus the same ~150 ms
-analysis; client round-trip from Korea is ~1.0 s and is network-dominated. 1536 MB is about
-32% faster than 1024 MB for about 2% more GB-ms cost. The workload is ~2 frames/s, so a
-~150 ms analysis fits the budget. The local Apple-Silicon figure (12.69 ms) is a different
-environment and must not be compared as same-hardware; we have not profiled why Graviton at
-1536 MB is slower than the laptop (vCPU share and pip build flags are candidates, untested).
+$20 budget alarm is the backstop. **Measured on the deployed stack** (AWS Lambda arm64 /
+Graviton, 1536 MB, us-east-1, 2026-10-22; `docs/cloud/LATENCY.md` C8/C10/C11,
+`docs/eval/LATENCY_REGRESSION.md`): the engine's per-frame analysis time is **~178–282 ms
+depending on the execution host**. The honest finding is a *range*, not one number:
+within a single warm host it is extremely stable (three runs ~177–179 ms, ±1 ms), but the
+same code, same input, and same day produced 178 / 247 / 282 / 297 ms purely by landing on
+different Graviton execution hosts. We ruled out the obvious suspects by A/B on Lambda —
+head pose adds only **+1.6 ms** (`NUNCHI_DISABLE_POSE` on/off; +0.43 ms locally), forcing
+OpenCV threads to 1 vs 2 is flat, and 1769 MB (one full vCPU) is ~34 ms faster but cannot
+explain a 2× swing. **The most consistent explanation is execution-host variance (CPU
+generation / neighbour contention / warm-vs-fresh); we could not confirm it directly
+because Lambda does not expose the host CPU to the function** — the conclusion rests on the
+pattern that every config change spawns a new host with a different stable latency while
+pose/threads stay flat. A forced cold start costs **~2.5 s median Init** (n=5, models load
+once) plus the same per-frame analysis; client round-trip from Korea is ~1.0 s and is
+network-dominated. At ~2 frames/s any value in this range fits the budget comfortably. The
+local Apple-Silicon figure (12.69 ms) is a different environment and must not be compared
+as same-hardware.
 
 ## 6. Evaluation
 
@@ -235,7 +274,8 @@ the agent is evaluated with a deterministic harness (stubbed vision/LLM, no netw
   vision result changing the action — a dark frame cleared by `second_look(enhance)` →
   silent; low confidence → ask the human; a forbidden LLM action → guardrail reject →
   rules; a real Bedrock call exceeding the 1 ms budget → rules fallback; a human "no" →
-  raised threshold. The whole-project test suite is **242** (`docs/STATUS.md`).
+  raised threshold. The whole-project test suite is **286** (`uv run pytest tests -q`,
+  2026-10-22; `docs/STATUS.md`).
 
 LLM cost: normal frames are the rules path (zero latency, zero cost); the Bedrock planner
 (Amazon Nova/Claude Haiku-class, Haiku 4.5 used) is called only on ambiguous moments.
@@ -271,10 +311,20 @@ prompts stored as hashes only).
   subscription = U2, out of scope). We publish an honest local arm64 baseline (12.69 ms,
   `docs/cool/RESULTS_local.md`) and keep the COOL row empty; AWS's published 20–70% COOL
   gain is **cited, not claimed as ours**. → not pursued (decision 2026-10-22).
-- **Deployment numbers come from one small run.** The Graviton latency (n=100 warm,
-  n=5 cold) is measured on the deployed stack, but from a single region/client and one
-  sample image; monthly cost is an estimate from public pricing, not a bill. The reason
-  Graviton at 1536 MB is slower than the Apple-Silicon laptop is not investigated.
+- **Deployment numbers are a host-dependent range, from one small run.** The Graviton
+  analyze time is **~178–282 ms depending on execution host** (stable ~178 ms within a
+  warm host), measured on the deployed stack but from a single region/client and one
+  sample image; monthly cost is an estimate from public pricing, not a bill. We A/B-tested
+  and cleared pose (+1.6 ms) and threads (flat) as causes; the residual 2× is attributed
+  to **execution-host variance that we could not confirm directly** (Lambda hides the host
+  CPU from the function), so it stays a best-supported hypothesis, not a proven cause
+  (`docs/eval/LATENCY_REGRESSION.md`).
+- **The posture buddy tracks relative change, not absolute angles.** Camera intrinsics and
+  the 3D face model are approximations, so yaw/pitch/roll are meaningful only as a delta
+  from the calibrated frontal pose; synthetic-rotation error is 0° with no noise but ~3–5°
+  (yaw/pitch) and ~2–3° (roll) under ±1.5 px jitter, and real-clip angle accuracy is
+  **not measured**. Screen motion is amplified ~1.5× for readability (disclosed in the UI).
+  Body/shoulder pose is not implemented (model-size budget, `docs/eval/BODY_POSE_FEASIBILITY.md`).
 
 ## 8. Responsible use
 
@@ -309,6 +359,8 @@ prompts stored as hashes only).
 |---|---|
 | Architecture / decisions | `docs/ARCHITECTURE.md`, `docs/CONTRACTS.md` |
 | OpenCV 5 impl / robustness | `docs/eval/VISION_ROBUSTNESS.md`, `docs/cool/RESULTS_local.md`, `docs/STATUS.md` |
+| Posture buddy (head pose) | `src/nunchi/vision/headpose.py`, `docs/eval/VISION_EVAL.md` §6, `docs/eval/BODY_POSE_FEASIBILITY.md`, `docs/screenshots/w10-buddy-*.png` |
+| Latency range / root cause | `docs/cloud/LATENCY.md` (C8/C10/C11), `docs/eval/LATENCY_REGRESSION.md` |
 | AWS deployment | `cloud/README.md`, `cloud/template.yaml` |
 | Vision accuracy | `docs/eval/VISION_EVAL.md` (unmeasured) |
 | Web / accessibility | `docs/eval/WEB_E2E.md` |
@@ -318,7 +370,7 @@ prompts stored as hashes only).
 
 ## PENDING list (conductor fills when C3 / U1 / U2 land)
 
-1. ~~Graviton analyze latency, cold start, deployed cost~~ — **resolved** by C8 (`docs/cloud/LATENCY.md`); root cause of the gap to the laptop is untested.
+1. ~~Graviton analyze latency, cold start, deployed cost~~ — **resolved** by C8/C10/C11 (`docs/cloud/LATENCY.md`); the 148↔281 ms "2×" was isolated to **execution-host variance** (pose +1.6 ms and threads cleared, `docs/eval/LATENCY_REGRESSION.md`), quoted as a ~178–282 ms host-dependent range. Host identity could not be read from the function, so the cause is a best-supported hypothesis, not directly confirmed.
 2. ~~`drink` doc conflict~~ — **resolved** (V8, `docs/eval/DRINK_FEASIBILITY.md`); `drink` accuracy on real clips remains unmeasured (see 3).
 3. **[PENDING: real-clip vision accuracy]** — P/R/F1 by behaviour and by lighting;
    `docs/eval/VISION_EVAL.md` is a template until U1 clips are recorded.

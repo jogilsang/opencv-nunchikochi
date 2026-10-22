@@ -81,3 +81,59 @@ The status string is only shown when `/healthz` actually returns those fields; i
 missing it is omitted (never invented). `web/config.json` is written for the capture and
 removed afterwards (it is gitignored; only `web/config.example.json` is committed).
 
+
+## Posture-buddy assets (`docs/screenshots/w10-*.png`) — W10
+
+The **posture buddy / 자세 인형** is a soft pastel clay figure (round head + capsule body +
+simple eyes/mouth — no bones, no skeleton) that mirrors the user's head angle from **numbers
+only** (`FrameResult.overlay.pose`: yaw/pitch/roll/depth/conf). No image, no landmark points.
+While vision hasn't shipped real pose yet it plays a synthetic neck fixture
+(`web/assets/pose-fixture.json`, numbers only) — DEMO playback, never a real measurement.
+Rendered with vendored three.js (`web/vendor/`, MIT, pinned r158, 652 KB — no CDN); drag/arrow
+rotation is hand-rolled (no OrbitControls); movement is shown ~1.5× with an on-screen label.
+
+| file | what it shows (video beat) |
+|---|---|
+| `w10-buddy-forward.png` | forward-head pose — buddy leans forward, colour warms to amber, state reads "Chin down 15°, Head leaning forward"; "Movement shown ~1.5× so it's easy to read" |
+| `w10-buddy-side-ghost.png` | side view of a head tilt with the **faint sky-blue good-posture ghost** overlaid (toggle) + legend "Faint sky-blue outline = good posture" (W11 — distinct colour family + thin outline, not a wireframe) |
+| `w10-buddy-unsure.png` | low confidence — buddy holds still, calm green, "Tracking unsure — holding still" badge; orange forward-head mark on the rewind track |
+| `w10-buddy-rewind.png` | report screen "Replay this session" — scrub the in-memory pose timeline (browser memory only); orange marks flag when the head leaned forward |
+| `w10-buddy-mobile.png` | mobile 390px — buddy renders at narrow width; the demo marker is a **full-width bottom strip** (W11) that never clips or covers the buddy's rewind hint |
+
+```bash
+# demo mode only (no camera, no server), software WebGL for headless capture:
+BASE=http://localhost:8099 node web/e2e/capture-w10.mjs   # → docs/screenshots/w10-*.png
+```
+
+### Screen recording for the buddy scene (SCRIPT §6 / SHOTLIST scene 6)
+
+- **Demo-mode buddy playback (auto):** `web/tools/record_demo.mjs` (demo mode, **no fake
+  camera**) now includes a buddy beat — it scrolls the buddy into view and drives
+  tilt → forward-head → side view + ghost → rewind scrub, so the buddy motion is captured
+  without any camera. Output webm is gitignored (`docs/video/recordings/`, never committed).
+  ```bash
+  python3 -m http.server 8099 --directory web
+  node web/tools/record_demo.mjs --base http://localhost:8099 --out docs/video/recordings
+  ```
+- **Live buddy short clip ([USER] — user's job):** a short clip of the buddy following a real
+  webcam (head tilt → lean forward → sit up → rewind) is recorded by the user per
+  `USER_RECORDING_GUIDE.md` step 3.5. Optional; the demo recording already covers the beat.
+
+### Suggested video beat (SCRIPT §6, ~40 s, after the agent panel)
+
+> "You can also see yourself as a calm posture buddy — it moves from angle numbers alone, no
+> image. Rotate it, compare to the faint sky-blue good-posture ghost, and scrub the timeline
+> to see exactly when your head crept forward. Angle numbers only, exaggerated ~1.5×, and it
+> doesn't estimate your shoulders or torso — head only."
+
+### Rules honoured (W10 / W11)
+
+- Numbers only: the buddy never touches images or raw landmark points (privacy modal states this).
+- Head only: shoulders/torso are **not** estimated (body pose deferred — `docs/eval/BODY_POSE_FEASIBILITY.md`); the narration says so.
+- Child-friendly: rounded clay figure, no bones/skeleton; calm green→amber, never red/fear colours.
+- Honest: the ~1.5× exaggeration is labelled on screen; low confidence holds still and says so; no accuracy claim.
+- Accessible: canvas is `role="img"` with a spoken aria-label, state is also shown as text
+  (never colour-only); ghost has a text legend; EN/KO throughout; axe violations stay at 0 (hard).
+- Resilient: three.js or WebGL unavailable → a simple 2D angle view; console errors stay at 0.
+- Memory only: the rewind track is a browser-memory ring buffer — never saved, sent, URL'd, or
+  localStorage'd. The demo marker stays visible as a full-width bottom strip (W11).
