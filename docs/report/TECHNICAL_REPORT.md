@@ -270,8 +270,7 @@ prompts stored as hashes only).
   zip, so a true A/B would require standing up a Graviton EC2 from the COOL AMI (a
   subscription = U2, out of scope). We publish an honest local arm64 baseline (12.69 ms,
   `docs/cool/RESULTS_local.md`) and keep the COOL row empty; AWS's published 20–70% COOL
-  gain is **cited, not claimed as ours**. → **[PENDING: COOL vs pip delta on Graviton,
-  gated on U2 subscription + EC2/AMI path]**.
+  gain is **cited, not claimed as ours**. → not pursued (decision 2026-10-22).
 - **Deployment numbers come from one small run.** The Graviton latency (n=100 warm,
   n=5 cold) is measured on the deployed stack, but from a single region/client and one
   sample image; monthly cost is an estimate from public pricing, not a bill. The reason
@@ -323,7 +322,6 @@ prompts stored as hashes only).
 2. ~~`drink` doc conflict~~ — **resolved** (V8, `docs/eval/DRINK_FEASIBILITY.md`); `drink` accuracy on real clips remains unmeasured (see 3).
 3. **[PENDING: real-clip vision accuracy]** — P/R/F1 by behaviour and by lighting;
    `docs/eval/VISION_EVAL.md` is a template until U1 clips are recorded.
-5. **[PENDING: COOL vs pip delta on Graviton]** — gated on U2 subscription + an EC2/AMI
-   path; AWS's 20–70% figure is cited, not ours (`docs/cool/LISTING_NOTES.md`).
+5. ~~COOL vs pip delta on Graviton~~ — **closed**: Best Use of COOL is not pursued (COOL is an AWS Marketplace AMI; this service is a Lambda zip). AWS's published figure is cited, not claimed.
 6. Submission logistics (registration, video, team introduction) are handled outside the repository.
 
