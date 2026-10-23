@@ -9,10 +9,15 @@ export class DemoLoadError extends Error {
 }
 
 export class DemoApi {
-  constructor({ url = "assets/demo-session.json" } = {}) {
+  constructor({ url = "assets/demo-session.json", loop = false } = {}) {
     this._url = url;
     this._data = null;
     this._i = 0;
+    // loop=true (default demo pacing): replay wraps forever and `done` never trips, so the
+    // run screen stays up at realtime speed until the judge ends it (W13 defect 4).
+    // loop=false (fast mode ?demo=1&fast=1 / e2e / recording): serve each step once, then
+    // `done` flips true and the app auto-advances to the report — the pre-W13 behaviour.
+    this._loop = !!loop;
   }
 
   // Load the recorded session once. Throws DemoLoadError on failure (app shows EN/KO notice).
@@ -60,7 +65,8 @@ export class DemoApi {
   }
 
   // Replays steps in order. During calibrate we don't advance the run timeline.
-  // After the last step, the calm tail (last step) repeats so playback never dead-ends.
+  // Loop mode wraps around so playback never dead-ends; one-shot mode holds on the last
+  // (calm) step and flips `done` so the app can auto-advance to the report.
   async sendFrame({ phase } = {}) {
     if (!this._data) await this.load();
     const steps = this._data.steps;
@@ -70,7 +76,12 @@ export class DemoApi {
       if (first.result) first.result.calibrated = false;
       return first;
     }
-    const idx = Math.min(this._i, steps.length - 1);
+    let idx;
+    if (this._loop) {
+      idx = this._i % steps.length;      // wrap forever
+    } else {
+      idx = Math.min(this._i, steps.length - 1); // hold on the last step
+    }
     this._i += 1;
     return clone(steps[idx]);
   }
@@ -85,9 +96,10 @@ export class DemoApi {
     return { summary: clone(this._data.end && this._data.end.summary) || null, previous: clone(this._data.previous) || null };
   }
 
-  // Playback is complete once every recorded step has been served at least once.
+  // Playback is "done" only in one-shot mode once every recorded step has been served at
+  // least once. In loop mode it never trips (the judge ends the session explicitly).
   get done() {
-    return !!this._data && this._i >= this._data.steps.length;
+    return !this._loop && !!this._data && this._i >= this._data.steps.length;
   }
 }
 

@@ -26,7 +26,7 @@ install chromium and re-run.
 
 ## 1. Browser e2e (Playwright, chromium)
 
-Command: `npm run e2e` → `web/e2e/run.mjs`. Last run: **27 / 27 passed, 0 failed.**
+Command: `npm run e2e` → `web/e2e/run.mjs`. Last run: **50 / 50 passed, 0 failed.**
 
 | Group | Check | Result |
 |---|---|---|
@@ -48,6 +48,15 @@ Command: `npm run e2e` → `web/e2e/run.mjs`. Last run: **27 / 27 passed, 0 fail
 | mode select (W6) | Live + consent but empty key → Start stays disabled | ✅ |
 | mode select (W6) | Demo + consent → Start enabled | ✅ |
 | mode select (W6) | access key never lands in localStorage / sessionStorage / URL | ✅ |
+| mode + pacing (W13) | before mode select: access key hidden AND demo strip hidden | ✅ |
+| mode + pacing (W13) | Demo selected → strip visible, access key hidden | ✅ |
+| mode + pacing (W13) | Live selected → access key visible, demo strip hidden (honest) | ✅ |
+| mode + pacing (W13) | `[hidden]` attribute truly forces `display:none` on display-styled elements | ✅ |
+| mode + pacing (W13) | default demo shows "Skip to report" + realtime progress controls | ✅ |
+| mode + pacing (W13) | default demo stays on run screen (no ~7s auto-advance; 60–90s window) | ✅ |
+| mode + pacing (W13) | default demo "Skip to report" ends the session on demand | ✅ |
+| posture buddy (W10) | 3D/2D init, pose track, exaggeration 1.5×, rewind scrub | ✅ (10 checks) |
+| demo strip (W11) | full-width bottom strip, no overlap, no clip @390/360px | ✅ (6 checks) |
 | error states | `denied` (camera refused) → recoverable screen + retry | ✅ |
 | error states | `server` (server error) → recoverable screen + retry | ✅ |
 | error states | `offline` (network drop) → recoverable screen + retry | ✅ |
@@ -116,6 +125,21 @@ The combined result is also visible in the refreshed demo frame
 `docs/screenshots/demo-05-run-toast.png` (2 toasts bottom-right, all metric cards
 visible, demo corner bottom-left, label reads normally).
 
+## 3b. W13 defect fixes (deployed-screen inspection)
+
+Four defects reproduced on the deployed site (desktop 1280 / mobile 390) are fixed; the
+run and start screenshots in `docs/screenshots/` are refreshed to match.
+
+| # | Defect (reproduced) | Fix |
+|---|---|---|
+| 1 | The `hidden` attribute was overridden by elements that set an explicit `display` (only `.modal-backdrop[hidden]` had a guard), so `hidden` silently did nothing on `.demo-corner`, `.live-panel`, `.field`, etc. | Global **`[hidden] { display: none !important; }`** in `styles.css`. Audited every `hidden`-toggled element; `.demo-corner` (flex) and `.live-panel` (grid) are the two that were leaking — both now respect the attribute. Class-based `.hidden` toggles (overlay canvas) are unaffected. |
+| 2 | The "Demo playback — not a real camera" strip showed on the first screen **and in Live mode** (before/after both visible), mislabelling a real camera session as playback. | The strip + DEMO badge are shown **only in demo mode** (`?demo=1` or the Demo card). Selecting Live (or starting a live/mock session) calls `hideDemoStrip()` and releases the reserved `body.has-demo-strip` space. e2e asserts the strip is hidden in the live run (`live.mjs`) and across the mode matrix (`run.mjs`). |
+| 3 | The access-key field showed before a mode was chosen (intended only for Live). | Fixed by defect 1: `#live-panel[hidden]` now truly hides. `selectMode` sets `livePanel.hidden = mode !== "live"`, so the key appears only for Live and is hidden for Demo / before any pick. |
+| 4 | The demo run auto-advanced to the report in ~7s (13 steps × 0.5s), too fast for a judge to see the overlay, buddy, agent panel, toasts. | Default demo now runs at **realtime speed for ~75s** (within the brief's 60–90s) with a **progress bar**, a **"Skip to report"** button, and the always-present **"End session"**; it never auto-advances — `DemoApi` loops the recorded steps until the judge ends it. The quick pre-W13 behaviour is preserved under **`?demo=1&fast=1`**, which the e2e suite and `record_demo.mjs` use. |
+
+Regression coverage for all four lives in the "mode + pacing (W13)" group (§1) plus the live
+no-strip check (§4b).
+
 ## 4. W6 live mode (Demo / Live, access key, service status)
 
 ### 4a. Start-screen mode select & key safety (self-contained e2e)
@@ -132,7 +156,7 @@ URL, or logs.
 Command: `node web/e2e/live.mjs` (needs a running service + static web server; use
 `scripts/run_local.sh`, or start the service any other way and pass `SVC`/`KEY`/`BASE`).
 Last run against a local `uvicorn nunchi.service.app` on `:8000` with a **Playwright fake
-camera**: **6 / 6 passed, 0 failed.**
+camera**: **7 / 7 passed, 0 failed.**
 
 | Check | Result |
 |---|---|
@@ -140,6 +164,7 @@ camera**: **6 / 6 passed, 0 failed.**
 | service status shows real runtime (arch / OpenCV) from `/healthz` | ✅ (`Running on arm64 · opencv · OpenCV 5.0.0`) |
 | key + consent enables Start; key stays in memory only (no localStorage / sessionStorage / URL leak) | ✅ |
 | live session runs: calibrate → run with overlay + metrics | ✅ |
+| live run shows **no** demo strip/badge/skip/progress (honesty — W13) | ✅ |
 | end session → report renders | ✅ |
 | no uncaught page errors during the live run | ✅ |
 

@@ -15,6 +15,11 @@
   --shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
 }
 * { box-sizing: border-box; }
+/* The `hidden` attribute must always win, even over elements that set an explicit
+   `display` (e.g. .demo-corner:display flex, .live-panel/.field:display grid). Without
+   this, `hidden` silently does nothing on those elements — which leaked the demo strip
+   and the access-key field before a mode was chosen (W13 defects 1-3). */
+[hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; }
 body {
   background: radial-gradient(1200px 600px at 50% -10%, #16202e 0%, var(--bg) 60%);
@@ -111,13 +116,11 @@ ul.privacy li { margin: 6px 0; }
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
 /* overlay toggle */
-.overlay-row { margin-top: 10px; }
-.switch { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; cursor: pointer; }
+.overlay-row { margin-top: 10px; }.switch { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; cursor: pointer; }
 .switch input { width: 18px; height: 18px; accent-color: var(--accent); }
 .overlay-hint { color: var(--muted); font-size: 12px; margin: 6px 0 2px; }
 
-.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; min-height: 30px; }
-.chip { background: var(--accent-soft); border: 1px solid var(--line); color: var(--fg); border-radius: 999px; padding: 4px 12px; font-size: 13px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; min-height: 30px; }.chip { background: var(--accent-soft); border: 1px solid var(--line); color: var(--fg); border-radius: 999px; padding: 4px 12px; font-size: 13px; }
 .chip.fresh { border-color: var(--accent); }
 
 .quality-banner {
@@ -130,6 +133,12 @@ ul.privacy li { margin: 6px 0; }
   border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; font-size: 14px;
 }
 .temp-error.show { display: block; }
+
+/* demo-only realtime playback progress (W13 defect 4) — shows elapsed/total so a judge
+   knows how long the demo runs; hidden in live/mock and in fast demo mode. */
+.demo-progress { margin-top: 12px; }
+.demo-progress .progress { width: 100%; max-width: none; }
+.demo-progress-note { color: var(--muted); font-size: 12.5px; margin: 6px 0 0; }
 
 /* toast / nudge — bottom-right stack (W5 ①): top-right overlapped the live metric cards,
    so toasts now sit at the bottom-right, newest on top, clear of the right-column metrics.

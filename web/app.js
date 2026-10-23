@@ -14,7 +14,13 @@ import { PostureBuddy, samplePoseAt, describePose, EXAGGERATION } from "./buddy.
 const params = new URLSearchParams(location.search);
 const MOCK = params.get("mock") === "1";
 const DEMO = params.get("demo") === "1";
+const FAST = params.get("fast") === "1"; // ?demo=1&fast=1 → pre-W13 quick playback (e2e, recording)
 const DEV = params.get("dev") === "1";
+
+// Default demo playback runs at realtime speed for this long before looping/stopping, so a
+// judge has time to watch the overlay, buddy, agent panel and toasts (W13 defect 4). Fast
+// mode skips this and auto-advances as soon as the recorded steps are exhausted.
+const DEMO_RUN_SECONDS = 75; // within the brief's 60–90s window
 
 // Live-mode access key. Memory only: never written to state, localStorage, the URL, or logs.
 let liveKey = "";
@@ -41,6 +47,7 @@ const state = {
   poseFixture: null,     // loaded synthetic pose series (fallback while vision has no pose)
   poseTimer: null,       // interval feeding fixture poses when the server sends none
   poseTrack: [],         // in-memory pose ring buffer for session rewind (W10 stage ②)
+  demoProgressTimer: null, // realtime demo progress ticker (W13 defect 4)
 };
 
 // Pose rewind ring buffer: browser memory only. Never saved, sent, URL'd, or localStorage'd.
@@ -83,12 +90,24 @@ function show(id) {
   for (const s of document.querySelectorAll(".screen")) s.classList.toggle("active", s.id === id);
 }
 
-// Reveal the persistent demo marker (full-width bottom strip) and reserve page space for it,
-// so it is always visible but never floats over content. Idempotent.
+// Reveal the persistent demo marker (full-width bottom strip) + the DEMO badge, and reserve
+// page space for the strip, so it is always visible but never floats over content. Idempotent.
 function showDemoStrip() {
   const c = document.getElementById("demo-corner");
   if (c) c.hidden = false;
+  const b = document.getElementById("demo-badge");
+  if (b) b.hidden = false;
   document.body.classList.add("has-demo-strip");
+}
+
+// Hide the demo marker + badge and release the reserved page space. Used when a mode other
+// than demo is chosen so a live session is never labelled as playback (W13 defect 2).
+function hideDemoStrip() {
+  const c = document.getElementById("demo-corner");
+  if (c) c.hidden = true;
+  const b = document.getElementById("demo-badge");
+  if (b) b.hidden = true;
+  document.body.classList.remove("has-demo-strip");
 }
 
 // ---------- start ----------
@@ -103,11 +122,7 @@ function initStart() {
 
   // badges for ?mock / ?demo deep-links
   if (MOCK) document.getElementById("mock-badge").hidden = false;
-  if (DEMO) {
-    const b = document.getElementById("demo-badge");
-    if (b) b.hidden = false;
-    showDemoStrip();
-  }
+  if (DEMO) showDemoStrip();
 
   // Gate the Start button on: mode chosen + consent + (live => key present & service not down).
   const refresh = () => {
@@ -128,6 +143,11 @@ function initStart() {
     demoCard.setAttribute("aria-checked", String(mode === "demo"));
     liveCard.setAttribute("aria-checked", String(mode === "live"));
     livePanel.hidden = mode !== "live";
+    // Honesty: the "Demo playback — not a real camera" strip + badge belong to demo mode
+    // only. Show them when Demo is picked; hide for Live so a real camera session is never
+    // mislabelled as playback (W13 defect 2). ?demo deep-link keeps the strip regardless.
+    if (mode === "demo") showDemoStrip();
+    else if (!DEMO) hideDemoStrip();
     if (mode === "live") checkService();
     refresh();
     if (mode === "live") keyInput.focus();
@@ -249,7 +269,8 @@ async function beginSession({ forceMock = false, live = false } = {}) {
   // screen (state.mode === "demo") or via ?demo=1. Mock/forceMock take precedence.
   const useDemo = !useMock && !live && (DEMO || state.mode === "demo");
   if (useDemo) {
-    state.api = new DemoApi();
+    // Loop (realtime pacing) unless fast mode is requested. Fast = one-shot auto-advance.
+    state.api = new DemoApi({ loop: !FAST });
     try {
       await state.api.load();
     } catch (e) {
@@ -257,7 +278,6 @@ async function beginSession({ forceMock = false, live = false } = {}) {
       return;
     }
     // badge/corner also show here when demo is picked without the ?demo deep-link
-    const b = document.getElementById("demo-badge"); if (b) b.hidden = false;
     showDemoStrip();
     state.capture = new Capture({ fps: state.cfg.fps, mock: true });
     state.recentEvents = [];
@@ -270,8 +290,10 @@ async function beginSession({ forceMock = false, live = false } = {}) {
     return;
   }
 
-  // Live (real camera + real server) or mock. For live we use the configured apiBase and
-  // the key the judge pasted (memory only); mock swaps both out.
+  // Live (real camera + real server) or mock — never demo (the demo branch returned above).
+  // Ensure the demo strip/badge are not showing so a real/mock session is never labelled as
+  // playback (honesty — W13 defect 2).
+  hideDemoStrip();
   state.api = useMock
     ? new MockApi()
     : new Api({ apiBase: state.cfg.apiBase, apiKey: liveKey || state.cfg.apiKey });
@@ -575,6 +597,46 @@ function startRun() {
     }
   });
   document.getElementById("btn-end").onclick = () => endSession();
+  initDemoRunControls();
+}
+
+// Demo-only run controls (W13 defect 4): a "Skip to report" button and, in default
+// (non-fast) demo mode, a realtime progress bar. The demo never auto-advances in default
+// mode — it loops until the judge presses Skip or End. Fast mode (?demo=1&fast=1) keeps the
+// pre-W13 auto-advance and shows neither control.
+function initDemoRunControls() {
+  const skip = document.getElementById("btn-skip");
+  const prog = document.getElementById("demo-progress");
+  const bar = document.getElementById("demo-progress-bar");
+  const note = document.getElementById("demo-progress-note");
+  stopDemoProgress();
+  const isDemo = DEMO || state.mode === "demo";
+  const showControls = isDemo && !FAST;
+  if (skip) {
+    skip.hidden = !showControls;
+    if (showControls) skip.onclick = () => { stopDemoProgress(); endSession(); };
+  }
+  if (!prog || !bar || !note) return;
+  prog.hidden = !showControls;
+  if (!showControls) return;
+  const total = DEMO_RUN_SECONDS;
+  const t0 = performance.now();
+  bar.style.width = "0%";
+  note.textContent = fmtTpl(t("demoProgress"), { elapsed: 0, total });
+  state.demoProgressTimer = setInterval(() => {
+    if (!document.getElementById("screen-run")?.classList.contains("active")) { stopDemoProgress(); return; }
+    const elapsed = (performance.now() - t0) / 1000;
+    const frac = Math.min(1, elapsed / total);
+    bar.style.width = `${Math.round(frac * 100)}%`;
+    if (elapsed >= total) {
+      note.textContent = t("demoProgressLoop"); // playback keeps looping; judge ends it
+    } else {
+      note.textContent = fmtTpl(t("demoProgress"), { elapsed: Math.round(elapsed), total });
+    }
+  }, 500);
+}
+function stopDemoProgress() {
+  if (state.demoProgressTimer) { clearInterval(state.demoProgressTimer); state.demoProgressTimer = null; }
 }
 
 function initOverlayToggle() {
@@ -886,6 +948,7 @@ function hideTempError() { document.getElementById("temp-error").classList.remov
 async function endSession() {
   state.capture.stopPump();
   stopBuddyFixtureFeed();
+  stopDemoProgress();
   let data;
   try {
     data = await state.api.endSession(state.sessionId);
@@ -1206,6 +1269,7 @@ function initLang() {
     get screen() { return document.querySelector(".screen.active")?.id; },
     mock: MOCK,
     demo: DEMO,
+    fast: FAST,
     get mode() { return state.mode; },
     // W6: report whether a live key is held in memory and that it is NOT persisted.
     // We return only booleans/length — never the key value itself.

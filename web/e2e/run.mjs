@@ -48,7 +48,9 @@ async function assertNoHScroll(page, where) {
 }
 
 async function startDemoToRun(page, { lang = "" } = {}) {
-  const q = ["demo=1"]; if (lang) q.push(`lang=${lang}`);
+  // fast=1 keeps the pre-W13 quick playback (auto-advances) so e2e stays fast and the
+  // report-reaching checks still work. Default-paced demo (60–90s) is covered separately.
+  const q = ["demo=1", "fast=1"]; if (lang) q.push(`lang=${lang}`);
   await page.goto(`${BASE}/?${q.join("&")}`, { waitUntil: "load" });
   await waitScreen(page, "screen-start");
   // consent + start
@@ -217,7 +219,81 @@ async function main() {
     await page.close();
   }
 
-  // ---- 3c. posture buddy (W10): 3D view, pose, rotation, ghost, low-conf, rewind ----
+  // ---- 3b2. W13: hidden-attribute matrix + demo pacing ----
+  group("mode visibility + demo pacing (W13)");
+  {
+    const page = await desktop.newPage();
+    await page.goto(`${BASE}/`, { waitUntil: "load" });
+    await page.waitForFunction(() => window.__nunchi);
+    await check("before mode select: key field hidden AND demo strip hidden", async () => {
+      assert(!(await page.isVisible("#live-panel")), "live panel visible before mode pick");
+      assert(!(await page.isVisible("#live-key")), "access key visible before mode pick");
+      assert(!(await page.isVisible("#demo-corner")), "demo strip visible before mode pick");
+      assert(!(await page.isVisible("#demo-badge")), "demo badge visible before mode pick");
+    });
+    await check("Demo selected: strip visible, key hidden", async () => {
+      await page.click("#mode-demo");
+      await page.waitForTimeout(80);
+      assert(await page.isVisible("#demo-corner"), "demo strip hidden after Demo pick");
+      assert(!(await page.isVisible("#live-key")), "access key visible in Demo mode");
+    });
+    await check("Live selected: key visible, demo strip hidden (honest)", async () => {
+      await page.click("#mode-live");
+      await page.waitForTimeout(80);
+      assert(await page.isVisible("#live-key"), "access key hidden in Live mode");
+      assert(!(await page.isVisible("#demo-corner")), "demo strip still visible in Live mode");
+      assert(!(await page.isVisible("#demo-badge")), "demo badge still visible in Live mode");
+    });
+    await check("[hidden] attribute truly hides display-styled elements", async () => {
+      // regression guard for defect 1: toggling the attribute must flip computed display
+      const disp = await page.evaluate(() => {
+        const el = document.getElementById("live-panel");
+        el.hidden = true;
+        const off = getComputedStyle(el).display;
+        el.hidden = false;
+        const on = getComputedStyle(el).display;
+        el.hidden = true;
+        return { off, on };
+      });
+      assert(disp.off === "none", `[hidden] did not set display:none (got ${disp.off})`);
+      assert(disp.on !== "none", "element stayed hidden without the attribute");
+    });
+    await page.close();
+  }
+
+  // default-paced demo must NOT auto-advance quickly (judge needs time)
+  {
+    const page = await desktop.newPage();
+    await page.goto(`${BASE}/?demo=1`, { waitUntil: "load" }); // no fast=1 → realtime pacing
+    await waitScreen(page, "screen-start");
+    await page.check("#consent").catch(() => {});
+    await page.click("#btn-start");
+    await waitScreen(page, "screen-run", 12000);
+    await check("default demo: Skip-to-report + progress controls shown", async () => {
+      assert(await page.isVisible("#btn-skip"), "skip button hidden in default demo");
+      assert(await page.isVisible("#demo-progress"), "demo progress hidden in default demo");
+      assert(await page.isVisible("#btn-end"), "end button missing");
+    });
+    await check("default demo: stays on run screen, won't auto-advance before its 60–90s window", async () => {
+      // The old build flipped to the report at ~7s. Prove that's gone two ways:
+      // (1) still on run after a sample well past 7s, and (2) the realtime window is 60–90s,
+      // so an auto-advance (if any) cannot happen before then — i.e. ≥30s is guaranteed.
+      await page.waitForTimeout(9000);
+      assert((await screen(page)) === "screen-run", "demo left run screen too early (regressed to auto-advance)");
+      const win = await page.evaluate(() => {
+        const note = document.getElementById("demo-progress-note")?.textContent || "";
+        const m = note.match(/\/\s*(\d+)\s*s/) || note.match(/\/\s*(\d+)\s*초/);
+        return m ? Number(m[1]) : 0;
+      });
+      assert(win >= 60 && win <= 90, `demo window ${win}s not within 60–90s`);
+    });
+    await check("default demo: Skip to report ends the session on demand", async () => {
+      await page.click("#btn-skip");
+      await waitScreen(page, "screen-report", 8000);
+      assert((await page.locator(".num-card").count()) >= 1, "no report after skip");
+    });
+    await page.close();
+  }
   group("posture buddy (W10)");
   {
     const page = await desktop.newPage();

@@ -87,6 +87,15 @@ async function main() {
     assert((await page.getAttribute("#btn-end", "data-i18n")) === "endSession", "run controls missing");
   });
 
+  await check("live run shows NO demo strip/badge (honesty — W13)", async () => {
+    assert(!(await page.isVisible("#demo-corner")), "demo strip visible during live run");
+    assert(!(await page.isVisible("#demo-badge")), "demo badge visible during live run");
+    assert(!(await page.isVisible("#btn-skip")), "demo skip button visible during live run");
+    assert(!(await page.isVisible("#demo-progress")), "demo progress visible during live run");
+    const bodyHasStrip = await page.evaluate(() => document.body.classList.contains("has-demo-strip"));
+    assert(!bodyHasStrip, "body still reserves demo-strip space in live run");
+  });
+
   await check("end session -> report renders", async () => {
     if ((await page.evaluate(() => window.__nunchi.screen)) === "screen-run") await page.click("#btn-end");
     await page.waitForFunction(() => window.__nunchi.screen === "screen-report", { timeout: 20000 });

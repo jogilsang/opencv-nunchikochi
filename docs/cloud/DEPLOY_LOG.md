@@ -207,3 +207,34 @@ threads are flat across the change. Corrected the earlier C10 "pose +133 ms" cla
 **Cleanup verified:** all env vars + memory restored to the pre-C11 baseline (1536 MB; 5
 original env vars, no thread/pose vars) and confirmed equal via `get-function-configuration`;
 reserved concurrency (5) and cost alarm untouched; `/healthz` 200, no-key 401 post-restore.
+
+## C12 — web static re-deploy (W13), 2026-10-23
+
+Same stack `nunchi` (captain / us-east-1). **Web static only — Lambda / API Gateway /
+DynamoDB untouched** (service code unchanged; W13 is a web-only change, e2e 50/50 @ 4845d1a).
+
+Upload used deploy.sh's web step equivalently (no full `deploy.sh --apply`, so the Lambda
+zip is not repackaged/redeployed):
+
+- `s3 sync web/ s3://<WebBucket>/ --exclude config.json --exclude config.example.json --exclude '*.md'`
+  → changed files uploaded: app.js, i18n.js, index.html, styles.css, demo.js,
+  e2e/run.mjs, e2e/live.mjs, e2e/capture-w10.mjs, tools/record_demo.mjs.
+  `vendor/three.module.min.js` (652,433 B) + three.LICENSE already present/unchanged — sync
+  skips them (verified still in bucket).
+- `web/config.json` written with **apiBase only (no key)** and `s3 cp` explicitly
+  (sync excludes it); SSM is the only place the X-Api-Key lives.
+- CloudFront invalidation `/*` created and waited to Completed.
+
+### Verify (curl, CloudFront)
+
+| path | result |
+|---|---|
+| `/` | HTTP/2 200, text/html, served via CloudFront (x-cache Hit) |
+| `/?demo=1` | 200, text/html |
+| `/config.json` | 200, application/json — body is apiBase only, **no key** |
+| `/vendor/three.module.min.js` | 200, text/javascript, 652,433 B |
+
+- Security headers: response carries `x-amz-server-side-encryption: AES256` from S3 origin;
+  no CSP/HSTS/X-Frame-Options response-headers policy is configured on the distribution, so
+  there was none to lose — C12 removed no header (state unchanged vs before).
+- Lambda / API Gateway / DynamoDB config left exactly as the C11 baseline.

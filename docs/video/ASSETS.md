@@ -17,16 +17,17 @@ uv run --with playwright python web/tools/capture.py \
     --base http://localhost:8099 --out docs/screenshots --lang en
 ```
 
-`web/tools/capture.py` drives `?demo=1`, walks the whole flow, and writes the PNGs below.
+`web/tools/capture.py` drives `?demo=1` (realtime-paced demo, so the run screen stays up and
+shows the progress + "Skip to report" controls), walks the whole flow, and writes the PNGs below.
 If Playwright is unavailable it prints install guidance and exits non-zero (captures nothing).
 
 ## Screenshots (`docs/screenshots/`)
 
 | file | screen | what it shows (video beat) |
 |---|---|---|
-| `demo-01-start.png` | Start / consent | value prop, privacy summary, consent gate, DEMO badge |
+| `demo-01-start.png` | Start / consent | value prop, privacy summary, consent gate, DEMO badge (demo mode only) |
 | `demo-02-calibrate.png` | Calibrate | 5-second neutral-posture countdown + progress |
-| `demo-03-run-overlay.png` | Live + overlay | metrics (EAR / head tilt / face distance) + "what OpenCV sees" overlay (face box + landmark points) |
+| `demo-03-run-overlay.png` | Live + overlay | metrics (EAR / head tilt / face distance) + "what OpenCV sees" overlay (face box + landmark points); in default demo the realtime progress bar + "Skip to report" controls are visible |
 | `demo-04-run-skeleton.png` | Live, low quality | quality banner + "Measuring…" skeleton (too dark / no face → agent asks for light) |
 | `demo-05-run-toast.png` | Live, nudge/confirm | sustained head-tilt nudge / human-in-the-loop confirmation toast |
 | `demo-06-agent-panel.png` | Agent activity | perceive→decide→act timeline; **second_look** rows "OpenCV re-checked before asking you" |
@@ -47,10 +48,13 @@ All 9 are 2× device-scale PNGs at 980px width (report/agent shots are full-page
 
 ## Short clips / GIFs
 
-Record the demo screen (e.g. the browser tab) while `?demo=1` plays — the recorded session runs
-on a fixed 0.5s/frame cadence and auto-advances start → calibrate → live beats → report, so a
-single screen recording yields the motion clips without any camera. (No GIF is committed here to
-keep the repo light; capture from the live demo for the final edit.)
+Record the demo screen (e.g. the browser tab) while `?demo=1&fast=1` plays — fast mode runs the
+recorded session on a fixed 0.5s/frame cadence and auto-advances start → calibrate → live beats →
+report, so a single screen recording yields the motion clips without any camera. (Plain `?demo=1`
+is realtime-paced ~60–90s and waits for a "Skip to report"/"End session" click instead of
+auto-advancing — good for a live walkthrough; fast mode is better for an unattended recording.)
+`web/tools/record_demo.mjs` uses `?demo=1&fast=1`. (No GIF is committed here to keep the repo
+light; capture from the live demo for the final edit.)
 
 ## Rules honoured
 

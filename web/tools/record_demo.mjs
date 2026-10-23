@@ -36,7 +36,7 @@ const cfgPath = join(webRoot, "config.json");
 function log(m) { console.log(`[record] ${m}`); }
 function fail(m, code = 1) {
   console.error(`[record] ERROR: ${m}`);
-  console.error("[record] manual fallback: open " + BASE + "/?demo=1 in a browser and screen-record the tab");
+  console.error("[record] manual fallback: open " + BASE + "/?demo=1&fast=1 in a browser and screen-record the tab");
   console.error("[record] (the demo auto-advances start -> calibrate -> run -> report; no camera needed).");
   process.exit(code);
 }
@@ -79,7 +79,9 @@ async function main() {
     page.on("pageerror", (e) => pageErrors.push(String(e)));
 
     log(`recording ${tag} flow from ${BASE} …`);
-    await page.goto(`${BASE}/${FLAG_LIVE ? "" : "?demo=1"}`, { waitUntil: "load" });
+    // fast=1 keeps the pre-W13 quick demo pacing the recorder was tuned against (auto-advances
+    // once the recorded steps are exhausted). Live mode has no demo pacing.
+    await page.goto(`${BASE}/${FLAG_LIVE ? "" : "?demo=1&fast=1"}`, { waitUntil: "load" });
     await page.waitForFunction(() => window.__nunchi);
 
     // beat: start screen (let viewers read the consent/mode)
@@ -168,7 +170,7 @@ async function main() {
   } catch (e) {
     exitCode = 1;
     console.error(`[record] recording failed: ${e && e.message || e}`);
-    console.error("[record] manual fallback: screen-record the tab at " + BASE + "/?demo=1 (auto-advancing demo).");
+    console.error("[record] manual fallback: screen-record the tab at " + BASE + "/?demo=1&fast=1 (auto-advancing demo).");
   } finally {
     if (browser) await browser.close().catch(() => {});
     if (FLAG_LIVE) { if (hadCfg) await writeFile(cfgPath, prevCfg); else await rm(cfgPath, { force: true }); }

@@ -14,6 +14,8 @@ Then open:
 
 - **Mock mode (no camera, no server):** <http://localhost:8080/?mock=1>
 - **Demo playback (recorded session, for the video / judges):** <http://localhost:8080/?demo=1>
+  (realtime pacing, ~60–90s, with a progress bar + "Skip to report"; add `&fast=1` for quick
+  auto-advancing playback used by e2e and the recorder)
 - **Live (needs the cloud tab's API + a camera over HTTPS/localhost):** <http://localhost:8080/>
 - Korean: add `&lang=ko` (e.g. `?mock=1&lang=ko`)
 
@@ -21,9 +23,12 @@ Then open:
 > (`assets/demo-session.json`, image-free `FrameResult`/`Decision` steps) through the *same code
 > path* as live — only the data source is swapped (`DemoApi`). Overlay, agent panel, nudges,
 > confirmation, and report all play with no camera and no server. A persistent
-> "Demo playback — not a real camera" marker is always on screen; nothing is presented as a real
-> measurement. Playback auto-ends into the report. Capture screenshots with `web/tools/capture.py`
-> (see `docs/video/ASSETS.md`).
+> "Demo playback — not a real camera" marker is on screen **in demo mode only** — live sessions
+> never show it. By default the run plays at realtime speed for ~60–90s with a progress bar and a
+> "Skip to report" button, and never auto-advances (it loops until you end it). Add `&fast=1`
+> (`?demo=1&fast=1`) for the pre-W13 quick playback that auto-advances into the report once the
+> recorded steps are exhausted — used by the e2e suite and the recorder. Capture screenshots with
+> `web/tools/capture.py` (see `docs/video/ASSETS.md`).
 
 > Cameras need HTTPS or `localhost`. Over plain HTTP on a remote host the app shows a
 > "secure connection required" screen with a one-click fallback to mock mode.

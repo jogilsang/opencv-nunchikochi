@@ -4,9 +4,12 @@ Owner: web tab (W7). Pairs each beat of `SCRIPT.md` with the exact on-screen ass
 caption line. Assets live in `docs/screenshots/` (see `ASSETS.md`); motion can be recorded
 with `web/tools/record_demo.mjs`. Architecture diagram is a conductor placeholder.
 
-`URL state`: `demo` = `?demo=1` (recorded session, no camera); `live` = local-live with a
-Playwright **fake** camera (`live-*` shots / `record_demo.mjs --live`); `n/a` = static asset.
-**[USER]** rows are optional on-camera/voice, user's choice (U5).
+`URL state`: `demo` = `?demo=1` (recorded session, no camera; realtime-paced ~60–90s with a
+progress bar + "Skip to report" — add `&fast=1` for quick auto-advancing playback, as the
+recorder does); `live` = local-live with a Playwright **fake** camera (`live-*` shots /
+`record_demo.mjs --live`); `n/a` = static asset. The "Demo playback — not a real camera" strip
+shows in demo mode only (never in live). **[USER]** rows are optional on-camera/voice, user's
+choice (U5).
 
 | # | time | screen / asset | URL state | narration line (abridged) | caption (burned-in) |
 |---|------|----------------|-----------|---------------------------|---------------------|

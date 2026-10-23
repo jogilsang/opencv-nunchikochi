@@ -167,7 +167,14 @@
 
             <div class="btn-row" style="margin-top:12px">
               <button class="btn secondary" id="btn-end" type="button" data-i18n="endSession"></button>
+              <button class="btn ghost" id="btn-skip" type="button" hidden data-i18n="skipToReport"></button>
               <button class="btn ghost" id="btn-agent" type="button" aria-expanded="false" aria-controls="agent-panel" data-i18n="agentOpen"></button>
+            </div>
+            <!-- Demo-only: realtime playback progress so a judge can see how long is left.
+                 Hidden in live/mock and in fast demo mode. -->
+            <div class="demo-progress" id="demo-progress" hidden>
+              <div class="progress"><span id="demo-progress-bar"></span></div>
+              <p class="demo-progress-note" id="demo-progress-note" role="status" aria-live="polite"></p>
             </div>
           </div>
           <div>
