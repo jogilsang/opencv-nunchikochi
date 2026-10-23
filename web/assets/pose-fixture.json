@@ -9,7 +9,8 @@
     { "label_en": "Head tilt", "label_ko": "고개 기울임", "note_en": "leans toward right shoulder", "from": 3.0, "to": 6.0 },
     { "label_en": "Forward head", "label_ko": "거북목", "note_en": "head juts forward, chin down", "from": 6.0, "to": 12.0 },
     { "label_en": "Tracking unsure", "label_ko": "추정 불안정", "note_en": "low confidence — buddy holds still", "from": 12.0, "to": 14.0 },
-    { "label_en": "Recovered", "label_ko": "회복", "note_en": "back to neutral", "from": 14.0, "to": 18.0 }
+    { "label_en": "Recovered", "label_ko": "회복", "note_en": "back to neutral", "from": 14.0, "to": 15.5 },
+    { "label_en": "Sip of water", "label_ko": "물 한 모금", "note_en": "measured drink event — right arm raises", "from": 15.5, "to": 17.0 }
   ],
   "samples": [
     { "t": 0.0,  "yaw_deg": 0.0,   "pitch_deg": 0.0,  "roll_deg": 0.0,  "depth": 1.00, "conf": 0.98 },
@@ -43,9 +44,9 @@
     { "t": 14.0, "yaw_deg": 0.2,   "pitch_deg": 5.5,  "roll_deg": 0.4,  "depth": 1.09, "conf": 0.88 },
     { "t": 14.5, "yaw_deg": 0.3,   "pitch_deg": 3.8,  "roll_deg": 0.5,  "depth": 1.06, "conf": 0.93 },
     { "t": 15.0, "yaw_deg": 0.1,   "pitch_deg": 2.4,  "roll_deg": 0.3,  "depth": 1.04, "conf": 0.95 },
-    { "t": 15.5, "yaw_deg": -0.2,  "pitch_deg": 1.4,  "roll_deg": 0.2,  "depth": 1.02, "conf": 0.96 },
-    { "t": 16.0, "yaw_deg": 0.0,   "pitch_deg": 0.8,  "roll_deg": 0.1,  "depth": 1.01, "conf": 0.97 },
-    { "t": 16.5, "yaw_deg": 0.3,   "pitch_deg": 0.4,  "roll_deg": -0.2, "depth": 1.00, "conf": 0.98 },
+    { "t": 15.5, "yaw_deg": -0.2,  "pitch_deg": 1.4,  "roll_deg": 0.2,  "depth": 1.02, "conf": 0.96, "drinking": true },
+    { "t": 16.0, "yaw_deg": 0.0,   "pitch_deg": 0.8,  "roll_deg": 0.1,  "depth": 1.01, "conf": 0.97, "drinking": true },
+    { "t": 16.5, "yaw_deg": 0.3,   "pitch_deg": 0.4,  "roll_deg": -0.2, "depth": 1.00, "conf": 0.98, "drinking": true },
     { "t": 17.0, "yaw_deg": -0.1,  "pitch_deg": 0.2,  "roll_deg": 0.1,  "depth": 1.00, "conf": 0.98 },
     { "t": 17.5, "yaw_deg": 0.2,   "pitch_deg": 0.0,  "roll_deg": 0.0,  "depth": 1.00, "conf": 0.99 }
   ]

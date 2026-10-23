@@ -305,8 +305,8 @@ async function main() {
       assert((await page.getAttribute("#buddy-canvas", "role")) === "img", "role!=img");
     });
     await check("buddy initializes (3D or graceful 2D) and records a pose track", async () => {
-      await page.waitForFunction(() => window.__nunchi && window.__nunchi.buddyReady(), null, { timeout: 6000 });
-      await page.waitForFunction(() => window.__nunchi.poseTrackLen() >= 3, null, { timeout: 6000 });
+      await page.waitForFunction(() => window.__nunchi && window.__nunchi.buddyReady(), null, { timeout: 10000 });
+      await page.waitForFunction(() => window.__nunchi.poseTrackLen() >= 3, null, { timeout: 8000 });
       const ex = await page.evaluate(() => window.__nunchi.buddyExaggeration());
       assert(ex === 1.5, `exaggeration ${ex} != 1.5`);
     });
@@ -323,7 +323,12 @@ async function main() {
       assert(await page.isVisible("#buddy-exag"), "exaggeration label hidden"));
     await check("forward-head pose updates aria-label + visible state", async () => {
       await page.evaluate(() => window.__nunchi.setBuddyPose({ yaw_deg: 0, pitch_deg: 15, roll_deg: 1, depth: 1.3, conf: 0.95 }));
-      await page.waitForTimeout(300);
+      // state-based: wait until the published aria-label actually describes the forward head,
+      // instead of assuming the smoothed animation has settled within a fixed delay.
+      await page.waitForFunction(() => {
+        const a = document.getElementById("buddy-canvas")?.getAttribute("aria-label") || "";
+        return /forward|앞으로|chin|숙/i.test(a);
+      }, null, { timeout: 4000 });
       const aria = await page.getAttribute("#buddy-canvas", "aria-label");
       assert(/forward|앞으로|chin|숙/i.test(aria), `aria not descriptive: ${aria}`);
       const state = await page.textContent("#buddy-state");
@@ -331,7 +336,7 @@ async function main() {
     });
     await check("low confidence holds still and shows 'tracking unsure'", async () => {
       await page.evaluate(() => window.__nunchi.setBuddyPose({ yaw_deg: 0, pitch_deg: 8, roll_deg: 0, depth: 1.1, conf: 0.3 }));
-      await page.waitForTimeout(250);
+      await page.waitForFunction(() => !document.getElementById("buddy-unsure")?.hidden, null, { timeout: 4000 });
       assert(!(await page.locator("#buddy-unsure").evaluate((el) => el.hidden)), "unsure badge hidden on low conf");
     });
     await check("view presets + ghost toggle work without errors", async () => {
@@ -351,7 +356,7 @@ async function main() {
     await check("report screen shows a rewind buddy built from the track", async () => {
       if ((await screen(page)) === "screen-run") await page.click("#btn-end");
       await waitScreen(page, "screen-report", 15000);
-      await page.waitForFunction(() => window.__nunchi.reportBuddyReady(), null, { timeout: 6000 });
+      await page.waitForFunction(() => window.__nunchi.reportBuddyReady(), null, { timeout: 10000 });
       assert(await page.isVisible("#report-buddy-canvas"), "report buddy canvas hidden");
       await page.evaluate(() => window.__nunchi.rewindScrub(0.8));
       await page.waitForTimeout(150);
@@ -361,6 +366,125 @@ async function main() {
     await check("no uncaught page errors across the buddy flow", async () =>
       assert(pageErrors.length === 0, `page errors: ${pageErrors.join(" | ")}`));
     await page.close();
+  }
+
+  // ---- 3c2. W14: sitting upper-body figure — parts, honesty line, drink, hold, triangles ----
+  group("sitting buddy (W14)");
+  {
+    const page = await desktop.newPage();
+    const pageErrors = [];
+    page.on("pageerror", (e) => pageErrors.push(String(e)));
+    // paced demo (no fast=1) so the run screen stays up for the manual buddy drives
+    await page.goto(`${BASE}/?demo=1`, { waitUntil: "load" });
+    await waitScreen(page, "screen-start");
+    await page.check("#consent").catch(() => {});
+    await page.click("#btn-start");
+    await waitScreen(page, "screen-run", 12000);
+    await page.waitForFunction(() => window.__nunchi && window.__nunchi.buddyReady(), null, { timeout: 10000 });
+    // take manual control of the buddy (stops the fixture feed overwriting our poses)
+    await page.evaluate(() => window.__nunchi.setBuddyPose({ yaw_deg: 0, pitch_deg: 0, roll_deg: 0, depth: 1, conf: 0.97 }));
+    await check("figure parts match the active render mode (3D figure or 2D fallback)", async () => {
+      // Read mode + parts + triangles atomically so they can't disagree across round-trips
+      // (the WebGL context can init to 3D or, under software GL, fall back to 2D by design).
+      const snap = await page.evaluate(() => ({
+        is3d: window.__nunchi.buddyIs3D(),
+        parts: window.__nunchi.buddyParts(),
+        tris: window.__nunchi.buddyTriangles(),
+      }));
+      if (snap.is3d) {
+        for (const p of ["head", "neck", "shoulders", "chest", "rightArm", "leftArm", "desk"]) {
+          assert(snap.parts.includes(p), `missing 3D part: ${p} (got ${snap.parts.join(",")})`);
+        }
+        assert(snap.tris > 0 && snap.tris <= 4000, `triangle budget out of range: ${snap.tris}`);
+      } else {
+        // graceful, by-design 2D fallback (software GL may refuse a context): a flat angle icon
+        assert(snap.parts.includes("head2d"), `2D fallback should report head2d (got ${snap.parts.join(",")})`);
+      }
+    });
+    await check("honesty line is shown: head+hand measured, neck+torso estimated, no legs", async () => {
+      const note = (await page.textContent(".buddy-measured-note"))?.trim() || "";
+      assert(/measured/i.test(note) && /estimate/i.test(note) && /legs/i.test(note),
+        `measured/estimated/legs disclosure missing: "${note}"`);
+    });
+    await check("accessibility: canvas is role=img with a live aria-label (either mode)", async () => {
+      assert((await page.getAttribute("#buddy-canvas", "role")) === "img", "buddy canvas role!=img");
+      const aria = (await page.getAttribute("#buddy-canvas", "aria-label")) || "";
+      assert(aria.trim().length > 0, "buddy canvas has no aria-label");
+    });
+    await check("the measured drink event raises the right arm, then it falls", async () => {
+      await page.evaluate(() => window.__nunchi.setBuddyDrinking(true));
+      await page.waitForFunction(() => window.__nunchi.buddyArmRaise() > 0.3, null, { timeout: 4000 });
+      const raised = await page.evaluate(() => window.__nunchi.buddyArmRaise());
+      assert(raised > 0.3, `arm did not raise: ${raised}`);
+      await page.evaluate(() => window.__nunchi.setBuddyDrinking(false));
+      await page.waitForFunction(() => window.__nunchi.buddyArmRaise() < 0.15, null, { timeout: 4000 });
+      const lowered = await page.evaluate(() => window.__nunchi.buddyArmRaise());
+      assert(lowered < 0.15, `arm did not lower: ${lowered}`);
+    });
+    await check("forward-head pose leans the estimated torso; aria names it an estimate", async () => {
+      await page.evaluate(() => window.__nunchi.setBuddyPose({ yaw_deg: 0, pitch_deg: 12, roll_deg: 1, depth: 1.4, conf: 0.95 }));
+      await page.waitForFunction(() => window.__nunchi.buddyTorsoLean() > 1, null, { timeout: 4000 });
+      const lean = await page.evaluate(() => window.__nunchi.buddyTorsoLean());
+      assert(lean > 1 && lean <= 18, `torso lean out of range: ${lean}`);
+      await page.waitForFunction(() => {
+        const a = document.getElementById("buddy-canvas")?.getAttribute("aria-label") || "";
+        return /estimate|추정/i.test(a);
+      }, null, { timeout: 4000 });
+      const aria = await page.getAttribute("#buddy-canvas", "aria-label");
+      assert(/estimate|추정/i.test(aria), `aria does not flag estimate: ${aria}`);
+    });
+    await check("low confidence holds the figure still (tracking unsure)", async () => {
+      // let the forward-head lean settle first (ramp complete) so `before` is a stable value,
+      // not a mid-animation sample that the next frame would still advance.
+      await page.waitForFunction(() => window.__nunchi.buddyTorsoLean() > 10, null, { timeout: 4000 }).catch(() => {});
+      let prev = -1, stable = 0;
+      await page.waitForFunction(() => true, null, { timeout: 100 });
+      for (let i = 0; i < 40 && stable < 3; i++) {
+        const v = await page.evaluate(() => window.__nunchi.buddyTorsoLean());
+        if (Math.abs(v - prev) < 0.05) stable++; else stable = 0;
+        prev = v;
+        await page.waitForTimeout(60);
+      }
+      const before = await page.evaluate(() => window.__nunchi.buddyTorsoLean());
+      await page.evaluate(() => window.__nunchi.setBuddyPose({ yaw_deg: 30, pitch_deg: 30, roll_deg: 20, depth: 1.9, conf: 0.2 }));
+      // the unsure badge flips synchronously; the rig then freezes — confirm the lean does not move.
+      await page.waitForFunction(() => !document.getElementById("buddy-unsure")?.hidden, null, { timeout: 4000 });
+      await page.waitForTimeout(350);
+      const after = await page.evaluate(() => window.__nunchi.buddyTorsoLean());
+      assert(Math.abs(after - before) < 0.5, `figure moved on low conf: ${before} → ${after}`);
+      assert(!(await page.locator("#buddy-unsure").evaluate((el) => el.hidden)), "unsure badge hidden on low conf");
+    });
+    await check("ghost (good-posture outline) toggles on the new figure without errors", async () => {
+      await page.check("#buddy-ghost");
+      await page.waitForTimeout(120);
+      assert(await page.locator("#buddy-ghost").isChecked(), "ghost not checked");
+      await page.uncheck("#buddy-ghost");
+    });
+    await check("keyboard rotates the figure (ArrowRight / Home), canvas keeps focus", async () => {
+      await page.focus("#buddy-canvas");
+      await page.keyboard.press("ArrowRight");
+      await page.keyboard.press("Home");
+      assert((await page.evaluate(() => document.activeElement?.id)) === "buddy-canvas", "canvas lost focus");
+    });
+    await check("no uncaught page errors across the sitting-buddy flow", async () =>
+      assert(pageErrors.length === 0, `page errors: ${pageErrors.join(" | ")}`));
+    await page.close();
+  }
+
+  // ---- 3c3. W14: mobile 390px shows the figure + honesty line without overflow ----
+  group("sitting buddy mobile (W14)");
+  {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 820 }, isMobile: true });
+    const page = await ctx.newPage();
+    await startDemoToRun(page);
+    await page.waitForFunction(() => window.__nunchi && window.__nunchi.buddyReady(), null, { timeout: 10000 });
+    await check("mobile 390px: buddy canvas + honesty line visible, no h-scroll", async () => {
+      assert(await page.isVisible("#buddy-canvas"), "buddy canvas hidden on mobile");
+      assert(await page.isVisible(".buddy-measured-note"), "honesty line hidden on mobile");
+      await assertNoHScroll(page, "mobile buddy");
+    });
+    await page.close();
+    await ctx.close();
   }
 
   // ---- 3d. W11: demo strip never covers buddy content (390px + 320px panel) ----

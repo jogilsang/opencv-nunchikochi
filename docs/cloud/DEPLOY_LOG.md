@@ -238,3 +238,35 @@ zip is not repackaged/redeployed):
   no CSP/HSTS/X-Frame-Options response-headers policy is configured on the distribution, so
   there was none to lose — C12 removed no header (state unchanged vs before).
 - Lambda / API Gateway / DynamoDB config left exactly as the C11 baseline.
+
+## C13 — web static re-deploy (W14 · W15), 2026-10-23
+
+Same stack `nunchi` (captain / us-east-1). **Web static only — Lambda / API Gateway /
+DynamoDB untouched** (service code unchanged; W15 verified e2e 3× 60/60 @ 52d6d81).
+
+- `s3 sync web/ --exclude config.json --exclude config.example.json --exclude '*.md'`
+  → uploaded changed files incl. new figure modules **buddy.js**, **buddy-kinematics.js**
+  (+ buddy-kinematics.test.mjs), app.js, i18n.js, index.html, styles.css,
+  assets/pose-fixture.json, e2e/{run,capture-w14}.mjs, tools/record_demo.mjs, package.json.
+- `web/config.json` written apiBase only (no key), `s3 cp` explicit; SSM holds the key.
+- CloudFront invalidation `/*` created and waited to Completed.
+
+### Verify (curl, CloudFront)
+
+| path | result |
+|---|---|
+| `/` | 200 text/html |
+| `/?demo=1` | 200 text/html |
+| `/config.json` | 200 application/json — apiBase only, **no key** |
+| `/buddy-kinematics.js` | 200 text/javascript |
+
+### Hash match — deployed vs local (`shasum -a 256`, first 16 hex)
+
+| file | local | deployed | |
+|---|---|---|---|
+| app.js | 8e544c0e2cfa5afe | 8e544c0e2cfa5afe | MATCH |
+| buddy.js | 906adc9a40b822e6 | 906adc9a40b822e6 | MATCH |
+| styles.css | 67afeb500f1d553c | 67afeb500f1d553c | MATCH |
+| index.html | 5428e603fececba1 | 5428e603fececba1 | MATCH |
+
+Lambda / API Gateway / DynamoDB config left exactly as the C11 baseline.

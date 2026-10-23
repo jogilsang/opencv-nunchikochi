@@ -26,7 +26,11 @@ install chromium and re-run.
 
 ## 1. Browser e2e (Playwright, chromium)
 
-Command: `npm run e2e` → `web/e2e/run.mjs`. Last run: **50 / 50 passed, 0 failed.**
+Command: `npm run e2e` → `web/e2e/run.mjs`. Last run: **60 / 60 passed, 0 failed.**
+
+Unit tests: `npm run test:unit` → `node --test buddy-kinematics.test.mjs` — **6 / 6 passed**
+(the pure posture→rig mapping: neutral base, 1.5× exaggerate + clamp, monotonic torso lean +
+cap, low-confidence hold, drink→right arm, NaN/undefined input).
 
 | Group | Check | Result |
 |---|---|---|
@@ -56,6 +60,14 @@ Command: `npm run e2e` → `web/e2e/run.mjs`. Last run: **50 / 50 passed, 0 fail
 | mode + pacing (W13) | default demo stays on run screen (no ~7s auto-advance; 60–90s window) | ✅ |
 | mode + pacing (W13) | default demo "Skip to report" ends the session on demand | ✅ |
 | posture buddy (W10) | 3D/2D init, pose track, exaggeration 1.5×, rewind scrub | ✅ (10 checks) |
+| sitting buddy (W14) | parts match the active render mode (3D figure or 2D fallback) + triangle budget ≤ 4000 when 3D | ✅ |
+| sitting buddy (W14) | honesty line shown: head+hand measured, neck+torso estimated, no legs | ✅ |
+| sitting buddy (W14) | accessibility: canvas role=img with a live aria-label (either mode) | ✅ |
+| sitting buddy (W14) | measured drink event raises the right arm, then it falls | ✅ |
+| sitting buddy (W14) | forward-head leans the estimated torso; aria names it an estimate | ✅ |
+| sitting buddy (W14) | low confidence holds the figure still ("tracking unsure") | ✅ |
+| sitting buddy (W14) | good-posture ghost toggles; keyboard rotate; no console errors | ✅ |
+| sitting buddy (W14) | mobile 390px: figure + honesty line visible, no h-scroll | ✅ |
 | demo strip (W11) | full-width bottom strip, no overlap, no clip @390/360px | ✅ (6 checks) |
 | error states | `denied` (camera refused) → recoverable screen + retry | ✅ |
 | error states | `server` (server error) → recoverable screen + retry | ✅ |
@@ -139,6 +151,62 @@ run and start screenshots in `docs/screenshots/` are refreshed to match.
 
 Regression coverage for all four lives in the "mode + pacing (W13)" group (§1) plus the live
 no-strip check (§4b).
+
+## 3c. W14 sitting posture buddy (measured vs estimated)
+
+The posture buddy was reworked from a sphere+capsule into a low-poly **seated upper-body
+figure** (head, neck, level shoulders, chest/belly, upper arms, forearms, hands at a simple
+desk; **legs not drawn**). Honesty is the point and is enforced in code + tests:
+
+- We MEASURE only the head angles (`overlay.pose` yaw/pitch/roll/depth) + the `drink` event.
+  The neck, torso and arms are a **model estimate** produced by the pure `buddy-kinematics.js`
+  (`estimated: true` on every output), unit-tested (`npm run test:unit`, 6/6).
+- A panel line states it on screen (EN/KO): *"Head and hand are measured; neck and torso are a
+  model estimate. Legs are not drawn."* The aria state appends *"— torso is estimated"* when
+  the figure leans, so a screen-reader user hears the distinction too (not visual-only).
+- The head follows the measured angles (1.5× exaggerated, clamped); `depth>1` leans the
+  estimated torso (capped 18°) and pushes the head forward; `roll` tilts head + upper neck only
+  (shoulders stay level — shoulder tilt is not measured); the measured drink event raises the
+  right arm toward the mouth over ~1.5s. Low confidence holds the last stable rig.
+- Low-poly: ≈ 3.2k triangles (≤ 4k budget), vendored three.js (no new bundle), hand-rolled
+  rotation, 30fps cap, breathing idle off under `prefers-reduced-motion`, 2D fallback intact.
+- Ghost (faint sky-blue good-posture outline), 3-axis rotation, session rewind, and the demo
+  fixture (now with a drink span) all carry over. e2e group "sitting buddy (W14)" (§1) plus the
+  unit tests cover parts, triangle budget, the honesty line, the drink arm, the estimated lean,
+  the low-confidence hold, ghost, keyboard rotation, and the mobile 390px layout.
+
+### 3c-flaky. W15 stabilization (intermittent e2e failure — recorded, not hidden)
+
+**Symptom.** `npm run e2e` passed 59/60 about once per ~10–20 runs; otherwise 60/60.
+
+**Failing check (named).** `sitting buddy (W14) › figure has the sitting upper-body parts` —
+error `2D fallback should report head2d (got head,neck,shoulders,chest,rightArm,leftArm,hand,desk)`.
+
+**Root cause (two parts).**
+1. *Test assumption.* The check read `buddyIs3D()` and `buddyParts()` in two separate
+   `page.evaluate` round-trips and branched on the first; under software GL (swiftshader) the
+   buddy sometimes initialises in its **by-design 2D fallback**, so a mode read that disagreed
+   with the parts read tripped the assertion. The 2D fallback is intended behaviour, not an app
+   bug — the test was mode-naive.
+2. *A real context leak in our code.* `_webglOK()` probed support by creating a throwaway
+   `<canvas>` and getting a WebGL context **without releasing it**. Under software GL's small
+   context budget, these leaked probe contexts (run buddy + report buddy) could make the real
+   `WebGLRenderer` fail to initialise and fall back to 2D more often than necessary.
+
+**Fix.**
+- Test: read `{is3d, parts, tris}` **atomically in one `page.evaluate`** and assert per mode —
+  3D ⇒ the upper-body parts + triangle budget ≤ 4000; 2D ⇒ the `head2d` icon. The honesty line
+  and the `role="img"` + live `aria-label` accessibility are asserted **in both modes**.
+- App: `_webglOK()` now loses its probe context (`WEBGL_lose_context`), and `dispose()` calls
+  `renderer.forceContextLoss()` so a following buddy can get a context. The per-frame render is
+  wrapped in try/catch so a transient GL hiccup skips a frame instead of surfacing as an
+  uncaught page error. Buddy-ready waits widened 6s→10s for headroom under CPU contention.
+- Converted a few fixed `waitForTimeout`+assert spots (forward-head aria, low-conf hold) to
+  **state-based** `waitForFunction` waits.
+
+**Result.** `npm run e2e` ran **15× consecutively with 0 failures** after the fix (unit 6/6,
+axe 0 hard). The e2e count stays 60 (the standalone triangle check folded into the atomic parts
+check; a role/aria accessibility check was added).
 
 ## 4. W6 live mode (Demo / Live, access key, service status)
 

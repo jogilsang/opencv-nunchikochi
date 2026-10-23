@@ -17,9 +17,12 @@ user-presence shots (clearly marked **[USER]**).
   clips** — if mentioned at all, say exactly that; never claim it works well.
 - Graviton latency/cold-start is `[PENDING]`; the only latency we may state is the local
   Apple-Silicon dev number, and only if labelled as such.
-- The **posture buddy** moves from the pose **angle numbers only** (`overlay.pose`): say it
-  uses angle numbers (no image), that movement is exaggerated ~1.5× for readability, and that
-  shoulders/torso are **not** estimated (head only). Never imply it measures the body.
+- The **posture buddy** is a sitting upper-body figure driven from the pose **angle numbers
+  only** (`overlay.pose`) plus the **drink event**: the head follows the measured angles
+  (exaggerated ~1.5× for readability); the neck, torso and arms are a **labelled model
+  estimate** (we do NOT measure shoulders, torso or legs — legs aren't drawn). Always pair it
+  with the on-screen line "head and hand are measured; neck and torso are an estimate." Never
+  imply it measures the body.
 
 Legend: **[USER]** = optional on-camera/voice by the user (they decide — U5). **[SCREEN]** =
 screen capture (demo or local-live, fake camera). **[DIAGRAM]** = architecture diagram
@@ -96,22 +99,26 @@ guardrails `src/nunchi/agent/guardrails.py`.
 
 ## Section 6 — The posture buddy: see yourself in numbers · ~40 s · [SCREEN]
 **Narration (EN):**
-> "All of this is easy to feel, not just read. Meet the posture buddy — a soft stand-in that
-> moves from the angle numbers alone, no image. Tilt your head and it tilts; lean in and it
-> leans forward. Spin it to the side and the forward-head creep is obvious. Turn on the
-> good-posture ghost — the faint sky-blue outline — to compare. And scrub the timeline to
-> replay the session and see exactly when your head crept forward. It uses angle numbers
-> only, movement is exaggerated about 1.5× so it's easy to read, and it does not estimate
-> your shoulders or torso — head only. When tracking is unsure it just holds still and says so."
+> "All of this is easy to feel, not just read. Meet the posture buddy — a soft, seated
+> upper-body figure. Here's the honest part, right on screen: the head and the drink are
+> measured; the neck and torso are a model estimate, and we don't draw the legs because we
+> don't track them. Tilt your head and it tilts; lean in and the head comes forward while the
+> body gives a gentle estimated bow. Take a sip and the measured drink event raises its arm.
+> Spin it to the side and the forward-head creep is obvious; turn on the faint sky-blue
+> good-posture ghost to compare, and scrub the timeline to see exactly when you crept forward.
+> Movement is exaggerated about 1.5× so it's easy to read, and when tracking is unsure it
+> just holds still and says so."
 
-KO 메모: 인형이 고개 기울임·앞으로 나옴을 따라 움직임 → Side로 돌려 거북목 → 고스트(연한 하늘색 윤곽) 비교 →
-되감기 슬라이더로 "이때부터 앞으로" 보기. 정직 표기(각도 숫자만·1.5배 과장·어깨/몸통 추정 안 함)는 화면 자막으로도.
+KO 메모: 앉은 상체 인형 → 화면 고지("머리·손은 측정, 목·몸통은 추정, 다리는 안 그림") → 고개 기울임/앞으로
+나옴(머리 측정 + 몸통 추정 숙임) → 물 마시기 이벤트로 팔 올라감 → Side로 거북목 → 고스트(연한 하늘색 윤곽)
+비교 → 되감기로 "이때부터 앞으로". **측정 vs 추정** 한 줄을 반드시 내레이션+자막에.
 데모 모드 인형 재생은 자동 녹화(`record_demo.mjs`), 실제 웹캠 인형 짧은 클립은 **[USER]** 녹화(선택).
-[SCREEN] `w10-buddy-forward.png` → `w10-buddy-side-ghost.png` → `w10-buddy-unsure.png` →
-`w10-buddy-rewind.png` (or motion from `record_demo.mjs`, buddy panel in view).
+[SCREEN] `w14-buddy-front-neutral.png` → `w14-buddy-front-forward.png` → `w14-buddy-drinking.png`
+→ `w14-buddy-side.png` → `w14-buddy-ghost.png` (or motion from `record_demo.mjs`, buddy panel in view).
 Sources: `docs/CONTRACTS.md` `overlay.pose` (yaw/pitch/roll/depth/conf, numbers only, head
-only — no shoulder/torso); head pose via solvePnP in `nunchi.vision` (V10); shoulders
-deferred per `docs/eval/BODY_POSE_FEASIBILITY.md`; buddy UI in `web/buddy.js`.
+only — no shoulder/torso) + the `drink` event; head pose via solvePnP in `nunchi.vision` (V10);
+the neck/torso/arm mapping is the estimate in `web/buddy-kinematics.js`; shoulders/torso not
+measured per `docs/eval/BODY_POSE_FEASIBILITY.md`; buddy UI in `web/buddy.js`.
 
 ## Section 7 — AWS architecture · ~20 s · [DIAGRAM]
 **Narration (EN):**
@@ -169,7 +176,7 @@ Sources: report screen.
 
 Buffer 0:05 under the 5:00 cap. If over, trim §4 and §7 first (most diagram-heavy, least
 narrative) — **never** trim the failure path (§8) or the honest-limits lines (incl. the
-buddy's "angle numbers only / ~1.5× / head only" note).
+buddy's "head + hand measured / neck + torso estimated / legs not drawn / ~1.5×" note).
 
 ## Submission requirement checklist (map to beats)
 - **Team / people**: §1 and §9 [USER] shots (user decides per U5).

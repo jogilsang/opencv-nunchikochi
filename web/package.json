@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "serve": "python3 -m http.server 8099 --directory .",
+    "test:unit": "node --test buddy-kinematics.test.mjs",
     "e2e": "node e2e/serve-and-run.mjs",
     "e2e:live": "node e2e/live.mjs"
   },

@@ -121,6 +121,11 @@ async function main() {
       await page.waitForTimeout(1300);
       await page.evaluate(() => window.__nunchi.setBuddyPose({ yaw_deg: 1, pitch_deg: 15, roll_deg: 2, depth: 1.33, conf: 0.95 }));
       await page.waitForTimeout(1500);
+      // measured drink event: the right arm raises toward the mouth, then falls (W14)
+      await page.evaluate(() => { window.__nunchi.setBuddyPose({ yaw_deg: 0, pitch_deg: 2, roll_deg: 0, depth: 1.02, conf: 0.96 }); window.__nunchi.setBuddyDrinking(true); });
+      await page.waitForTimeout(1600);
+      await page.evaluate(() => window.__nunchi.setBuddyDrinking(false));
+      await page.waitForTimeout(700);
       // spin to the side and show the good-posture ghost
       await page.evaluate(() => window.__nunchi.buddySetView(70, 0));
       await page.check("#buddy-ghost").catch(() => {});

@@ -350,12 +350,18 @@ body.has-demo-strip { padding-bottom: 42px; }
 
 /* ---------- posture buddy (W10) ---------- */
 .buddy-wrap {
-  margin-top: 16px; padding: 14px; border: 1px solid var(--line);
+  margin-top: 16px; padding: 14px 14px 18px; border: 1px solid var(--line);
   border-radius: var(--radius); background: var(--panel-2);
 }
 .buddy-head { margin-bottom: 8px; }
 .buddy-title { margin: 0; font-size: 15px; }
 .buddy-hint { margin: 2px 0 0; color: var(--muted); font-size: 12.5px; }
+/* W14 honesty line: measured vs estimated. Slightly emphasised so it isn't missed. */
+.buddy-measured-note {
+  margin: 6px 0 0; color: var(--fg); font-size: 12px; line-height: 1.45;
+  border-left: 3px solid var(--accent); padding: 4px 0 4px 9px;
+  background: rgba(91,157,240,.08); border-radius: 0 6px 6px 0;
+}
 .buddy-stage { position: relative; width: 100%; }
 .buddy-canvas {
   display: block; width: 100%; height: 300px; border-radius: 12px;
@@ -386,7 +392,7 @@ body.has-demo-strip { padding-bottom: 42px; }
 .chip-btn:hover { border-color: var(--accent); }
 .buddy-rotate-hint { margin: 8px 0 0; color: var(--muted); font-size: 11.5px; }
 .buddy-ghost-legend { margin: 6px 0 0; color: #8fd0ff; font-size: 11.5px; }
-.buddy-state { margin: 6px 0 0; color: var(--fg); font-size: 13px; min-height: 1.2em; }
+.buddy-state { margin: 6px 0 2px; color: var(--fg); font-size: 13px; min-height: 2.6em; line-height: 1.4; overflow-wrap: anywhere; }
 
 @media (max-width: 680px) {
   .buddy-canvas { height: 260px; }

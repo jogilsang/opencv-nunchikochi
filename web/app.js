@@ -48,6 +48,7 @@ const state = {
   poseTimer: null,       // interval feeding fixture poses when the server sends none
   poseTrack: [],         // in-memory pose ring buffer for session rewind (W10 stage ②)
   demoProgressTimer: null, // realtime demo progress ticker (W13 defect 4)
+  drinkUntil: 0,         // performance.now() until which the measured drink gesture is active (W14)
 };
 
 // Pose rewind ring buffer: browser memory only. Never saved, sent, URL'd, or localStorage'd.
@@ -407,6 +408,12 @@ function recordPose(pose) {
   }
 }
 
+// Measured drink gesture (W14): a `drink` event opens a short window during which the buddy's
+// right arm is raised toward the mouth. The arm itself animates in buddy.js over ~1.5s.
+const DRINK_GESTURE_MS = 1600;
+function markDrinking() { state.drinkUntil = performance.now() + DRINK_GESTURE_MS; }
+function isDrinkingNow() { return performance.now() < state.drinkUntil; }
+
 async function initBuddy() {
   const canvas = document.getElementById("buddy-canvas");
   if (!canvas) return;
@@ -666,19 +673,26 @@ function handleFrame(resp, tSec = 0) {
   renderMetrics(result.metrics || {}, qualityPoor);
   renderQuality(result.quality || {});
   renderEvents(result.events || []);
+  // posture buddy drink gesture (W14): the `drink` behaviour (palm-near-mouth) is a MEASURED
+  // event. When it appears, raise the buddy's right arm toward the mouth for the gesture, then
+  // let it fall. Works for both the real-pose path and the fixture feed.
+  const drinking = Array.isArray(result.events) && result.events.some((e) => e && e.type === "drink");
+  if (drinking) markDrinking();
   // overlay: server may omit it (null) -> draw nothing
   state.lastOverlay = result.overlay || null;
   const canvas = document.getElementById("run-overlay");
   if (state.overlayOn) drawOverlay(canvas, state.lastOverlay);
   else clearOverlay(canvas);
-  // posture buddy (W10): if the server sent a real pose, drive the buddy from it and stop
-  // the fixture feed. Numbers only — overlay.pose is {yaw,pitch,roll,depth,conf}.
+  // posture buddy (W10/W14): if the server sent a real pose, drive the buddy from it and stop
+  // the fixture feed. Numbers only — overlay.pose is {yaw,pitch,roll,depth,conf}. The measured
+  // drink event (above) is merged in so the arm raises.
   const realPose = result.overlay && result.overlay.pose;
   if (realPose && state.buddy) {
     state.usingRealPose = true;
     stopBuddyFixtureFeed();
-    state.buddy.setPose(realPose);
-    recordPose(realPose);
+    const posed = { ...realPose, drinking: isDrinkingNow() };
+    state.buddy.setPose(posed);
+    recordPose(posed);
     const unsureEl = document.getElementById("buddy-unsure");
     if (unsureEl) unsureEl.hidden = !(realPose.conf != null && realPose.conf < 0.5);
   }
@@ -1285,6 +1299,14 @@ function initLang() {
     buddyIs3D: () => !!(state.buddy && state.buddy.mode3d),
     buddyExaggeration: () => EXAGGERATION,
     buddyState: () => (state.buddy ? describePose(state.buddy._lastPose, t) : ""),
+    // W14: report the figure's parts (head/neck/shoulders/arms/…), triangle budget, and the
+    // smoothed right-arm raise (0..1) so tests can see the drink gesture move the arm.
+    buddyParts: () => (state.buddy ? state.buddy.parts() : []),
+    buddyTriangles: () => (state.buddy ? (state.buddy.triangleCount || 0) : 0),
+    buddyArmRaise: () => (state.buddy ? Number((state.buddy.shown?.rightArmRaise ?? 0).toFixed(3)) : 0),
+    buddyTorsoLean: () => (state.buddy ? Number((state.buddy.shown?.torsoLean ?? 0).toFixed(3)) : 0),
+    setBuddyDrinking: (on) => { if (on) markDrinking(); else state.drinkUntil = 0; if (state.buddy) state.buddy.setDrinking(!!on); },
+    forceBuddyArmRaise: (v) => { if (state.buddy) state.buddy.forceArmRaise(v); },
     poseTrackLen: () => state.poseTrack.length,
     reportBuddyReady: () => !!state.reportBuddy,
     rewindScrub: (frac) => {

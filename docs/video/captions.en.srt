@@ -84,18 +84,18 @@ is rejected, and the rules decide instead.
 
 19
 00:03:15,000 --> 00:03:27,000
-Meet the posture buddy — a soft stand-in that moves from the
-angle numbers alone, no image. Tilt your head and it tilts; lean in and it leans forward.
+Meet the posture buddy — a seated upper-body figure. The head and drink
+are measured; the neck and torso are a model estimate, and the legs aren't drawn.
 
 20
 00:03:27,000 --> 00:03:42,000
-Spin it to the side and the forward-head creep is obvious.
-Turn on the good-posture ghost — the faint sky-blue outline — to compare.
+Tilt your head and it tilts; lean in and the body gives an estimated bow.
+Take a sip and the measured drink event raises its arm. The sky-blue ghost is good posture.
 
 21
 00:03:42,000 --> 00:03:55,000
 Scrub the timeline to see exactly when your head crept forward.
-Angle numbers only, exaggerated about 1.5× — and it doesn't estimate your shoulders, head only.
+Movement is exaggerated about 1.5×, and when tracking is unsure it holds still.
 
 22
 00:03:55,000 --> 00:04:15,000
