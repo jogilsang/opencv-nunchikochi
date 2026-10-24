@@ -1,223 +1,209 @@
 <!--
-Devpost submission text for Nunchikochi (agent tab, A8).
+Devpost submission text for Nunchikochi (agent tab, A10 = v2).
+v2 reorders to the winning-entry shape (meta block -> try-it -> one scene -> one
+headline number + reproduction -> who-decides-what -> product -> build -> limits).
 Paste the sections below into the matching Devpost fields. HTML comments carry the
 evidence path for every number; delete the comments before pasting if the field
-strips them. Do NOT paste secrets, account ids, or API keys. Posture-buddy claim is
-held at the end until it lands.
-Word count (sections 1-10, excluding this comment, headings, tags, links): ~1,150.
+strips them. Do NOT paste secrets, account ids, or API keys.
+Word count (sections 1-13, excluding this comment, headings, tags, links): ~1,180.
 -->
 
-# 1. Tagline + short description
+# 0. Meta block (put at the very top of the project page)
 
-**Tagline** (<=80 chars):
-Nunchikochi — a webcam coach that reads your posture and knows when to stay quiet.
+- **Theme**: self-awareness coaching with OpenCV 5 on AWS
+- **Special prize**: Agentic Vision
+- **Live (no key needed)**: https://dhys8dgxlvbgx.cloudfront.net/?demo=1
+- **Code**: https://github.com/jogilsang/opencv-nunchikochi
+- **Built with**: OpenCV 5 · AWS Lambda (Graviton/arm64) · API Gateway · CloudFront+S3 · DynamoDB · Bedrock · FastAPI · ONNX · NumPy · JavaScript
 
-**Short description** (~300 chars):
-Nunchikochi watches your own desk habits through the laptop webcam with OpenCV 5 —
-forward lean, head tilt, deep blinks, yawns, stepping away, forgetting to drink — and
-an agent decides each frame whether to nudge, look again, or stay silent. Video is
+---
+
+# 1. Try it in one minute (judges, start here)
+
+Open **https://dhys8dgxlvbgx.cloudfront.net/?demo=1** — no camera, no key, no sign-up.
+A short recorded session plays automatically (a 60–90 s window; "Skip to report" ends
+it on demand). <!-- docs/eval/WEB_E2E.md W13 row "60–90s window"; web/app.js ?demo -->
+
+Three things to watch:
+1. the **overlay** drawing the detected face landmarks and behaviours,
+2. the **posture buddy** — a clay upper-body avatar that mirrors your head angle and
+   screen distance (head + drink are measured; neck/torso are estimated and the UI says so),
+3. the **agent activity panel** listing each frame's decision (nudge / confirm / look
+   again / stay silent). <!-- docs/eval/WEB_E2E.md core-flow + posture-buddy rows -->
+
+**Live mode** (your own webcam) needs an access key supplied with the submission note;
+everything that matters is visible in demo mode without it.
+
+---
+
+# 2. One desk, 2:40 PM (an illustrative day — not a real user)
+
+It's 2:40 PM and Mina has been heads-down for two hours. Her head has drifted toward the
+screen, her chin is dropping, and her blinks are getting longer and slower. She doesn't
+notice any of it — that's the point of a habit. A blunt tool would have buzzed her
+twelve times by now and she'd have muted it before lunch.
+
+**Nunchikochi** watches her own desk habits through the laptop webcam with OpenCV 5 —
+forward lean, head tilt, deep blinks, yawns, stepping away, forgetting to drink — and an
+agent decides *each frame* whether to nudge, look again, or **stay quiet**. The video is
 never stored. "Nunchi" (눈치) is the Korean sense of reading a room; this reads you.
 
 ---
 
-# 2. Inspiration — the problem and who it's for
+# 3. The number that is the product
 
-People in long focused desk sessions drift into habits they never notice: leaning toward
-the screen, a tilted head, long "deep" blinks, yawning, forgetting to drink water, or
-stepping away. Each is a small cumulative ergonomic signal. Existing tools either ignore
-them or over-correct with constant, context-blind alerts that users mute within a day.
+**You can send a frame, and it leaves no trace — proven by a counterexample, not a
+promise.** A test uploads a JPEG carrying a unique marker, runs it through the live
+perceive→decide path, then searches every surface the frame could leak into — new files
+on disk, every captured log line, the persisted DynamoDB session state, the CloudWatch
+EMF metric stream, and the `/v1/trace` response — in raw, hex, **and** base64. The
+marker is found **0 times across all five surfaces**; 5 counterexample tests pass.
+<!-- tests/service/test_no_persist.py; tests/review/test_privacy_no_frame_leak.py -->
 
-Nunchikochi is for the individual knowledge worker who wants gentle, private
-self-feedback on their own machine — not an employer dashboard, not a wellness score.
-The hard problem is not detection; it is restraint. A signal is not a reason to
-interrupt. The interesting question was **when to stay quiet** — which is why judgement
-is a separate, testable agent rather than an if-statement on the detector.
+Reproduce it:
 
----
+```bash
+uv run --group service --group dev pytest \
+  tests/service/test_no_persist.py tests/review/test_privacy_no_frame_leak.py -q
+# -> 5 passed
+```
 
-# 3. What it does
-
-Nunchikochi runs a perceive → decide → act loop on each webcam frame:
-
-- **Six self-awareness signals** from OpenCV: forward lean (posture), head tilt,
-  blink / sustained "deep" blink, yawn, stepping **away**, and hand-to-mouth **drink**
-  reminders. <!-- src/nunchi/contracts.py BehaviorType; src/nunchi/vision -->
-- **An agent decides, not a threshold.** Each frame it chooses to nudge, confirm with
-  the person, re-analyse the same frame a different way ("look again"), or stay silent —
-  suppressing nudges during do-not-disturb, when you are away, or in a focus block.
-  <!-- src/nunchi/agent/policy.py; docs/eval/AGENT_EVAL.md -->
-- **Human in the loop.** Before asking anything, OpenCV looks again (`second_look`); on
-  a low-confidence signal it asks yes/no, and if you say a signal was wrong it raises
-  its threshold so it stops asking.
-  <!-- tests/agent/test_guardrails_deep.py::test_denial_raises_threshold_and_persists_across_frames -->
-- **An end-of-session report** of aggregate habits (no video, no per-frame data),
-  written with an optional Amazon Bedrock call and a template fallback.
-- **On-screen, keyboard-first UI** with an explicit consent modal and an
-  always-visible camera-on indicator. <!-- docs/eval/WEB_E2E.md -->
-- **A posture buddy** — a pastel clay head avatar that mirrors your head pitch/yaw/roll
-  and screen distance in real time (3-axis view, ghost of your calibrated pose, in-browser
-  session rewind), driven by five numbers only (never an image).
-  <!-- src/nunchi/vision/headpose.py; docs/CONTRACTS.md overlay.pose; docs/screenshots/w10-buddy-*.png -->
+Restraint is measured too: across the agent harness, `second_look` (OpenCV re-reading the
+same frame) **changed the decision in 3 of 7 ambiguous moments (42.9%)** — e.g. a dark
+frame cleared to "stay silent", or a low-confidence signal that zoomed in and dismissed
+itself instead of interrupting. (Stub-driven; see Limitations.)
+<!-- docs/eval/AGENT_EVAL.md "second_look 후 결정 변경 비율 3/7" -->
 
 ---
 
-# 4. How we built it
+# 4. Who decides what
 
-**OpenCV 5 (all vision).** Pinned to `opencv-python-headless==5.0.0.93`, no external
-inference framework. Face detection is YuNet via `cv2.FaceDetectorYN`; landmarks are a
-478-point FaceMesh ONNX model through `cv2.dnn`; an optional MediaPipe palm ONNX
-powers the hand-to-mouth "drink" cue (centre only, no skeleton). The posture buddy's
-head yaw/pitch/roll + depth come from six Face Mesh points through **`cv2.solvePnP`**
-(roll from the steadier eye-line metric). Eye- and mouth-aspect-ratio and face scale are
-all OpenCV + NumPy. A deterministic largest-face picker stops a passer-by from hijacking
-the frame. The agent's "look again" calls `analyze_variant` to re-read the *same* frame
-with CLAHE + gamma, a face crop-and-zoom, or stricter thresholds — state is never mutated
-by a variant. <!-- docs/report/TECHNICAL_REPORT.md §4; src/nunchi/vision/headpose.py -->
+> **The vision pipeline measures, the code decides, the model only proposes.**
 
-**AWS.** The workload runs on a single **AWS Lambda function, arm64 (Graviton),
-Python 3.12** (FastAPI under Mangum) as a pip zip. Public traffic enters through
-**Amazon API Gateway** → Lambda; the static web is **Amazon S3** (private) +
-**Amazon CloudFront** (Origin Access Control); session state is **Amazon DynamoDB**
-(on-demand, TTL) — aggregate numbers only, never images. The API key is an
-**AWS Systems Manager** SecureString read at runtime, never in the repo/template/logs;
-if unresolvable the service fails closed. **Amazon CloudWatch** Embedded Metric Format
-emits numbers and bounded labels only (no image bytes, bodies, keys, or ids). The
-optional report planner uses **Amazon Bedrock** (Claude Haiku-class).
+| Layer | What it owns |
+|---|---|
+| **OpenCV pipeline** (measures) | Face detection, 478-point mesh, eye/mouth aspect ratios, face scale, head yaw/pitch/roll + depth. Produces numbers only — never a decision, never a label. <!-- src/nunchi/vision --> |
+| **Rule policy / agent** (decides) | Every frame picks nudge / confirm / look-again / silent; suppresses during do-not-disturb, away, or focus blocks. Normal frames take the zero-cost rules path. <!-- src/nunchi/agent/policy.py --> |
+| **LLM — Bedrock, optional** (proposes only) | May *suggest* a report sentence or an ambiguous-frame action. A whitelist guardrail rejects any action/tool/argument outside the allowed set; a no-diagnosis guardrail blocks health claims; a latency budget falls back to rules. The model never has the last word. <!-- src/nunchi/agent/guardrails.py --> |
+| **The person** (final authority) | Consent is explicit; the camera-on state is always visible. On low confidence the agent asks yes/no, and **if you say a signal was wrong it raises that threshold and stops asking**. <!-- tests/agent/test_guardrails_deep.py::test_denial_raises_threshold_and_persists_across_frames --> |
+
+---
+
+# 5. What it does
+
+- **Six self-awareness signals** from OpenCV: forward lean, head tilt, blink / sustained
+  "deep" blink, yawn, stepping **away**, and a hand-to-mouth **drink** reminder.
+  <!-- src/nunchi/contracts.py BehaviorType -->
+- **An agent decides, not a threshold** — nudge, confirm, re-analyse the same frame a
+  different way ("look again"), or stay silent.
+- **An end-of-session report** of aggregate habits only (no video, no per-frame data),
+  written by an optional Bedrock call with a template fallback.
+- **A posture buddy** avatar mirroring head pitch/yaw/roll and screen distance in real
+  time, driven by five numbers only — never an image.
+  <!-- src/nunchi/vision/headpose.py; docs/CONTRACTS.md overlay.pose -->
+- **Keyboard-first, accessible web UI** with an explicit consent modal.
+
+---
+
+# 6. How we built it (short)
+
+**OpenCV 5 does all vision**, pinned to `opencv-python-headless==5.0.0.93`, no external
+inference framework: YuNet face detection (`cv2.FaceDetectorYN`), a 478-point FaceMesh
+ONNX model via `cv2.dnn`, an optional palm ONNX for the "drink" cue, and head
+yaw/pitch/roll from six mesh points through **`cv2.solvePnP`** (roll from the steadier
+eye-line metric). A deterministic largest-face picker stops a passer-by hijacking the
+frame. <!-- docs/report/TECHNICAL_REPORT.md §4 -->
+
+**On AWS**, the workload is a single **Lambda on arm64 (Graviton), Python 3.12** (FastAPI
+under Mangum); **API Gateway** fronts it, **S3 + CloudFront (OAC)** serve the static web,
+**DynamoDB** (on-demand, TTL) holds aggregate numbers only, the API key lives in **SSM**
+SecureString (fail-closed), and **CloudWatch EMF** emits numbers and bounded labels only.
+The optional report planner uses **Bedrock** (Claude Haiku-class).
 <!-- docs/cloud/ENDPOINT.md; docs/report/TECHNICAL_REPORT.md §5 -->
 
-**Agent design.** Perception (OpenCV) and judgement (agent) are separate components
-joined only by a typed, image-free contract. The agent has seven tools, a guardrail
-layer that rejects any LLM-proposed action/tool/argument outside a whitelist, and a
-JSONL trace with no image data or coordinates. Normal frames take the zero-cost rules
-path; Bedrock is called only on ambiguous moments, bounded by a per-frame latency
-budget with a rules fallback. <!-- src/nunchi/agent/ -->
+**One build note (this is a coding-agent hackathon):** perception and judgement were
+built as separate components joined only by a typed, image-free contract, developed in
+parallel tabs with an independent reviewer tab that may not touch source — which is why
+each half is testable on its own.
 
 ---
 
-# 5. Why this is Agentic Vision
+# 7. Why this is Agentic Vision
 
-<!-- docs/submission/AGENTIC_VISION.md; docs/submission/traces/ -->
-The **visual result changes the next decision, tool call, and approval request** —
-shown as runnable traces, not slides:
-
-- A dark frame → OpenCV `second_look(enhance)` clears it → decision flips to silent.
-- Low confidence → `second_look(zoom_face)`; if still unsure, ask the human.
-- An LLM proposing a forbidden action → guardrail rejects it → rules decide.
-- A real Bedrock call over the frame budget (2.8 s) → rules fallback.
-- A human "no" → the agent raises its threshold and stops asking.
-
-Evidence: five demo traces (`docs/submission/traces/`), a workflow spec
-(`docs/diagrams/AGENT_WORKFLOW_SPEC.md`), and 22 deterministic + 9 adversarial scenarios
-— every workflow branch mapped to a trace or test.
+The **visual result changes the next decision, tool call, and approval request** — shown
+as runnable traces, not slides: a dark frame cleared by `second_look` flips to silent; a
+low-confidence signal zooms in and, if still unsure, asks the human; a forbidden LLM
+action is rejected and rules decide; a real Bedrock call over the 2.8 s budget falls back
+to rules; a human "no" raises the threshold. Evidence: five demo traces
+(`docs/submission/traces/`), a workflow spec, and 22 deterministic + 9 adversarial
+scenarios — every branch mapped to a trace or test.
+<!-- docs/submission/AGENTIC_VISION.md -->
 
 ---
 
-# 6. Challenges we ran into
+# 8. Built / Measured / Not measured (honest)
 
-- **An org SCP blocked our public endpoint.** The Lambda Function URL (AuthType NONE)
-  was denied (403) by an organization Service Control Policy. We swapped the public entry
-  point to an API Gateway HTTP API (same stack, region, tags) and health checks returned
-  200. <!-- docs/cloud/ENDPOINT.md -->
-- **A state-restore defect, caught by e2e before deploy.** End-to-end checks surfaced two
-  mismatches in how session state restored across Lambda instances; we fixed them before
-  the real deploy, not in production. <!-- docs/STATUS.md 지휘자 검증 row -->
-- **Blink is hard at ~2 fps.** A 200 ms blink often falls between frames, so single-frame
-  counting undercounts. We report a PERCLOS-like eyes-closed fraction and only claim
-  sustained closure (deep blink). <!-- docs/report/TECHNICAL_REPORT.md §7 -->
-- **Synthetic evaluation is not real-world evaluation.** Robustness numbers come from
-  public samples + synthetic transforms; we did not tune thresholds on them or present
-  them as accuracy. Real-clip accuracy is still pending.
+| Status | What |
+|---|---|
+| **Built & measured** | 286 automated tests pass (`uv run pytest tests -q`); web e2e 60/60 + buddy unit 6/6, axe WCAG 2 A/AA with 0 hard violations; per-frame OpenCV **~178–282 ms** on real Graviton (stable ~178 ms within one warm host), ~2.5 s cold Init; frame non-storage proven by the 5 counterexample tests above. <!-- docs/eval/WEB_E2E.md; docs/cloud/LATENCY.md; tests/service/test_no_persist.py --> |
+| **Synthetic baseline** | Vision robustness is from public sample images + synthetic transforms; thresholds were **not** tuned on them and these are **not** accuracy. Synthetic head-pose error ~3–5° yaw/pitch, ~2–3° roll under jitter. <!-- docs/eval/VISION_EVAL.md §6 --> |
+| **Not measured** | Per-behaviour accuracy on real recorded clips; `drink` validation on real clips; the buddy's neck/torso/shoulders are **estimated** from head+hand, not measured body pose. <!-- docs/eval/BODY_POSE_FEASIBILITY.md --> |
+| **On hold** | Best Use of COOL (COOL is an AWS Marketplace AMI; this service is a Lambda zip). |
 
----
-
-# 7. Accomplishments / what we learned
-
-- **286 automated tests pass** across vision, agent, cloud, and web, including a test
-  that proves frames are never persisted. <!-- `uv run pytest tests -q` = 286 passed, 2026-10-22 -->
-- **Measured on real AWS Graviton**, not just a laptop: the per-frame OpenCV analysis is
-  **~178–282 ms depending on the execution host** (stable ~178 ms within one warm host),
-  with a **~2.5 s median cold-start Init**. We A/B-tested on Lambda and cleared head pose
-  (+1.6 ms) and thread count as causes; the honest conclusion is a host-variance *range*,
-  not a single headline number. <!-- docs/cloud/LATENCY.md C8/C10/C11; docs/eval/LATENCY_REGRESSION.md -->
-- **Estimated ~$1–2/month** at demo scale (~50k frames), idle ≈ $0 — all usage-priced,
-  no NAT, no provisioned capacity, with a $20 budget alarm as backstop.
-  <!-- docs/report/TECHNICAL_REPORT.md §5; cloud/README.md -->
-- **Web is accessible**: Playwright e2e 27/27 and axe-core WCAG 2 A/AA scans with 0 hard
-  violations. <!-- docs/eval/WEB_E2E.md -->
-- We learned that the honest version of "smart" is a system that knows the limits of its
-  own perception and asks — and that separating OpenCV from the agent made both
-  independently testable.
+Blink is undercounted at ~2 fps (a 200 ms blink falls between frames), so we report a
+PERCLOS-like eyes-closed fraction and only claim sustained closure. Agent evaluation is
+stub-based: 100% means specification conformance, not generalisation; LLM metrics are
+smoke-level. Cost **~$1–2/month** at demo scale (~50k frames), idle ≈ $0, is an estimate
+from public pricing with a $20 budget alarm — not a bill.
+<!-- docs/report/TECHNICAL_REPORT.md §5,§7 -->
 
 ---
 
-# 8. Responsible use & privacy
+# 9. Challenges we ran into
 
-- **No video, ever stored.** A test uploads a JPEG with a unique marker and asserts it
-  appears in no new file, no debug log, and no response — raw, hex, or base64.
-  <!-- tests/service/test_no_persist.py -->
-- **Not a diagnosis.** The tool reports observations ("your head has been tilted for a
-  while"), never a state or health claim. A deterministic no-diagnosis guardrail blocks
-  such phrasings in English and Korean and is covered by tests.
-  <!-- src/nunchi/agent/guardrails.py; tests/agent/test_guardrails_deep.py -->
-- **No identification.** No face recognition, single-user only, not a multi-person
-  monitor. Consent is explicit and the camera-on state is always visible.
-- Traces carry no image data or coordinates; only aggregate numbers go to DynamoDB
-  under a TTL.
-
----
-
-# 9. Limitations (honest)
-
-- **Real-clip vision accuracy is not yet measured** — recorded-clip evaluation pending;
-  robustness numbers are synthetic (public samples + transforms) and do not generalise.
-  <!-- docs/eval/VISION_EVAL.md; docs/report/TECHNICAL_REPORT.md §7 -->
-- **`drink` is conditional**: implemented via an OpenCV palm ONNX model, emitted only
-  when that optional model file is present.
-- **The posture buddy tracks relative change, not absolute angles.** Intrinsics and the
-  3D model are approximations (synthetic-rotation error ~3–5° yaw/pitch, ~2–3° roll under
-  jitter; real-clip angle accuracy unmeasured); on-screen motion is amplified ~1.5× for
-  readability (shown in the UI). Shoulder/body pose is not implemented (model-size budget).
-  <!-- docs/eval/VISION_EVAL.md §6; docs/eval/BODY_POSE_FEASIBILITY.md -->
-- **Blink is undercounted at low fps** (see Challenges); we report deep blinks instead.
-- **Agent evaluation is stub-based** (deterministic vision/LLM stubs, self-written
-  scenarios) — 100% means specification conformance, not a generalisation claim. LLM
-  metrics are smoke-level.
-- **Deployment numbers are one small run** (single region/client, one sample image);
-  monthly cost is an estimate from public pricing, not a bill.
+- **An org SCP blocked our public endpoint.** The Lambda Function URL (AuthType NONE) was
+  denied (403) by an organization Service Control Policy; we swapped the public entry
+  point to an API Gateway HTTP API (same stack/region/tags) and health checks returned 200.
+  <!-- docs/cloud/ENDPOINT.md -->
+- **A state-restore defect, caught by e2e before deploy**, in how session state restored
+  across Lambda instances — fixed before the real deploy, not in production.
+- **A single latency number was a lie.** The warm per-frame time swung ~178↔282 ms between
+  runs; we A/B-tested on Lambda, cleared head pose (+1.6 ms) and thread count as causes,
+  and now report a host-variance *range*. <!-- docs/cloud/LATENCY.md; docs/eval/LATENCY_REGRESSION.md -->
 
 ---
 
 # 10. What's next
 
 - Record real clips and publish per-behaviour precision/recall/F1 by lighting.
-- Extend the posture buddy from head-only to shoulders/torso once an int8 body-pose model
-  is verified under `cv2.dnn` and fits the model-size budget
-  (`docs/eval/BODY_POSE_FEASIBILITY.md`).
+- Replace the buddy's estimated neck/torso with a real int8 body-pose model once it is
+  verified under `cv2.dnn` and fits the model-size budget.
+  <!-- docs/eval/BODY_POSE_FEASIBILITY.md -->
 - Tune thresholds on real data instead of conservative starting values.
-- Optional multi-session trends while keeping the no-video, single-user guarantees.
 
 ---
 
-# 11. Built with
+# 11. Responsible use & privacy
+
+No video ever stored (proven above); not a diagnosis (a deterministic no-diagnosis
+guardrail blocks health claims in English and Korean); no face recognition, single-user
+only. Traces carry no image data or coordinates; only aggregate numbers go to DynamoDB
+under a TTL. <!-- src/nunchi/agent/guardrails.py; tests/service/test_no_persist.py -->
+
+---
+
+# 12. Built with (tags)
 
 opencv · python · aws-lambda · aws-graviton · amazon-api-gateway · amazon-cloudfront ·
 amazon-s3 · amazon-dynamodb · aws-systems-manager · amazon-cloudwatch · amazon-bedrock ·
 fastapi · mangum · javascript · onnx · numpy
 
-<!-- All tags are facts: Lambda arm64 (Graviton), API Gateway HTTP API, CloudFront+S3,
-DynamoDB, SSM SecureString, CloudWatch EMF, Bedrock (report path), FastAPI+Mangum,
-vanilla JS web, ONNX models via cv2.dnn, NumPy. No tag for a service we do not use. -->
-
 ---
 
-# 12. Try it out
+# 13. Links
 
 - **Code**: https://github.com/jogilsang/opencv-nunchikochi
-- **Live web**: https://dhys8dgxlvbgx.cloudfront.net
+- **Live demo (no key)**: https://dhys8dgxlvbgx.cloudfront.net/?demo=1
   <!-- docs/cloud/ENDPOINT.md CloudFront; kept until 2026-11-10 then destroyed -->
-- **API key for the live demo**: `[ASK USER]`
-  <!-- app-level X-Api-Key in SSM SecureString /nunchi/api-key — never in this repo -->
-
-# 13. Video
-
-`[USER: add after upload]`
+- **API key for Live mode**: `[ASK USER — supply in submission note, never in repo]`
+- **Video**: `[USER: add after upload]`

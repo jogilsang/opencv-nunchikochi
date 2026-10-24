@@ -89,6 +89,16 @@ service runs locally under `uvicorn` for development and ships unchanged to AWS.
   "Packaging"). `boto3` is excluded (provided by the runtime). A container path is kept
   only as a fallback if COOL (§5, §7) turns out to be container/AMI-only.
 
+**Who decides what.** One declarative line: *the vision pipeline measures, the code
+decides, the model only proposes.*
+
+| Layer | What it owns |
+|---|---|
+| OpenCV pipeline (measures) | Face detection, 478-point mesh, eye/mouth aspect ratios, face scale, head yaw/pitch/roll + depth — numbers only, never a decision or label (`nunchi.vision`). |
+| Rule policy / agent (decides) | Each frame chooses nudge / confirm / look-again / silent; suppresses during do-not-disturb, away, or focus blocks; normal frames take the zero-cost rules path (`nunchi.agent.policy`). |
+| LLM — Bedrock, optional (proposes) | May suggest a report sentence or an ambiguous-frame action; a whitelist guardrail rejects out-of-set actions/tools/args, a no-diagnosis guardrail blocks health claims, and a latency budget falls back to rules. Never the last word (`nunchi.agent.guardrails`). |
+| The person (final authority) | Explicit consent, always-visible camera indicator; on low confidence the agent asks yes/no, and a denial raises that threshold and stops asking (`tests/agent/test_guardrails_deep.py`). |
+
 ![Agent workflow](../diagrams/agent_workflow.png)
 
 *Figure 2. Agent workflow for one frame (full). A simplified loop is in `docs/diagrams/agent_workflow_compact.png`.*
@@ -249,10 +259,9 @@ and EAR becomes unstable past ±20° rotation. Glasses are **unmeasured** (no pu
 sample; not faked).
 
 **Web end-to-end & accessibility** (`docs/eval/WEB_E2E.md`): Playwright browser e2e
-**27/27 passed**; a local live integration against `uvicorn` with a fake camera **6/6
-passed**; axe-core WCAG 2 A/AA scans show **0 hard violations** (two remaining items are
-hand-verified contrast advisories on a zero-area footer span). Run in demo/mock mode; no
-real camera or AWS needed.
+**60/60 passed** and the buddy-kinematics unit tests **6/6 passed**; axe-core WCAG 2 A/AA
+scans show **0 hard violations** (two remaining items are hand-verified contrast
+advisories on a zero-area footer span). Run in demo/mock mode; no real camera or AWS needed.
 
 **Agent decision quality** (`docs/eval/AGENT_EVAL.md`, `docs/submission/AGENTIC_VISION.md`):
 the agent is evaluated with a deterministic harness (stubbed vision/LLM, no network).
@@ -283,6 +292,15 @@ Development Bedrock spend to date ≈ **$0.012** against a $2 cap (`agent/llm_ca
 prompts stored as hashes only).
 
 ## 7. Limitations (honest)
+
+Summary table (detail in the bullets below):
+
+| Status | What |
+|---|---|
+| Built & measured | 286 tests; web e2e 60/60 + buddy unit 6/6, axe 0 hard violations; analyze ~178–282 ms/frame on real Graviton (stable ~178 ms per warm host), ~2.5 s cold Init; frame non-storage proven by 5 counterexample tests. |
+| Synthetic baseline | Vision robustness from public samples + synthetic transforms (not tuned, not accuracy); head-pose error ~3–5° yaw/pitch, ~2–3° roll under jitter. |
+| Not measured | Real-clip per-behaviour accuracy; `drink` on real clips; the posture buddy's neck/torso/shoulders are estimated from head+hand, not measured body pose. |
+| On hold | Best Use of COOL (Marketplace AMI vs our Lambda zip). |
 
 - **No real-clip vision evaluation yet.** All behaviour accuracy is unmeasured; robustness
   numbers are synthetic (4 public samples + transforms) and do not generalise until real
