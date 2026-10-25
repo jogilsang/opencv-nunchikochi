@@ -150,8 +150,9 @@ the contract; with ±1.5 px landmark jitter the mean error is roughly yaw ~3–5
 ~5°, roll ~2–3° (`docs/eval/VISION_EVAL.md` §6). Body pose (shoulders/torso) is **not**
 implemented — the only Face-Mesh-free path (MediaPipe pose, two-stage) exceeds the ~8 MB
 model budget at fp32 (17.56 MB) and the int8 variant's `cv2.dnn` 5.0 load is unverified,
-so it is deferred (`docs/eval/BODY_POSE_FEASIBILITY.md`). Screenshots:
-`docs/screenshots/w10-buddy-*.png`.
+so it is deferred (`docs/eval/BODY_POSE_FEASIBILITY.md`). The buddy is a **face + neck**
+figure (W20; the body/arms/desk were removed), so head pose and facial expression drive it
+and the neck is a labelled estimate. Screenshots: `docs/screenshots/w22-buddy-*.png`.
 - **Primary-face selection** (`select_primary_face`, `docs/eval/VISION_ROBUSTNESS.md`
   §3): the largest face, tie-broken toward screen centre — deterministic — so a person
   walking past in the background cannot hijack the analysis.
@@ -201,7 +202,12 @@ The core workload runs on AWS; the browser only captures and displays
   and summaries only, never images or raw landmarks.
 - **Secrets**: the API key is an **SSM SecureString** read at runtime and never written to
   the template, logs, or the client config file; if it is set but unresolvable the service
-  **fails closed** (`503 auth_unavailable`), never open.
+  **fails closed** (`503 auth_unavailable`), never open. For Live mode the page issues a
+  one-button **30-minute trial key** (no shared key is passed to judges), limited per IP
+  (3/day) and globally (6/day); the per-IP limiter stores only a **keyed hash** of the
+  client IP for 48 h (HMAC salt in SSM), so the raw IP is never stored and is removed from
+  access logs. (The C/cloud tab owns the `<aws-profile>` deploy; this report does not embed
+  a profile name.)
 - **Observability** (`cloud/README.md` "Operations"): CloudWatch **Embedded Metric
   Format** (no `PutMetricData`, no extra IAM) emits `FrameLatencyMs`, `Decisions`,
   `Errors`, `RateLimited`, `Sessions` — **numbers and bounded labels only**, never image
@@ -259,7 +265,7 @@ and EAR becomes unstable past ±20° rotation. Glasses are **unmeasured** (no pu
 sample; not faked).
 
 **Web end-to-end & accessibility** (`docs/eval/WEB_E2E.md`): Playwright browser e2e
-**87/87 passed** and the buddy-kinematics unit tests **6/6 passed**; axe-core WCAG 2 A/AA
+**97/97 passed** and the buddy-kinematics unit tests **7/7 passed**; axe-core WCAG 2 A/AA
 scans show **0 hard violations** (two remaining items are hand-verified contrast
 advisories on a zero-area footer span). Run in demo/mock mode; no real camera or AWS needed.
 
@@ -288,7 +294,7 @@ the agent is evaluated with a deterministic harness (stubbed vision/LLM, no netw
   delayed ~10 min — the cost of being quiet; `docs/eval/ALERT_CALMING.md`). The agent also
   folds a per-window bad-posture timeline (5/10/30/60 min + hour-rate) and a ≤5-session
   trend (anonymous per-browser id, numbers only) into the end-of-session report. The
-  whole-project test suite is **320** (`uv run pytest -q`, 2026-10-22; `docs/STATUS.md`).
+  whole-project test suite is **361** (`uv run pytest -q`, 2026-10-25; `docs/STATUS.md`).
 
 LLM cost: normal frames are the rules path (zero latency, zero cost); the Bedrock planner
 (Amazon Nova/Claude Haiku-class, Haiku 4.5 used) is called only on ambiguous moments.
@@ -301,9 +307,9 @@ Summary table (detail in the bullets below):
 
 | Status | What |
 |---|---|
-| Built & measured | 320 tests; web e2e 87/87 + buddy unit 6/6, axe 0 hard violations; analyze ~178–282 ms/frame on real Graviton (stable ~178 ms per warm host), ~2.5 s cold Init; frame non-storage proven by 5 counterexample tests; synthetic 1-hour calming 9 → 5 alerts. |
+| Built & measured | 361 tests; web e2e 97/97 + buddy unit 7/7, axe 0 hard violations; analyze ~178–282 ms/frame on real Graviton (stable ~178 ms per warm host), ~2.5 s cold Init; frame non-storage proven by 5 counterexample tests; synthetic 1-hour calming 9 → 5 alerts. |
 | Synthetic baseline | Vision robustness from public samples + synthetic transforms (not tuned, not accuracy); head-pose error ~3–5° yaw/pitch, ~2–3° roll under jitter; drink typing/chin-rest false-positive paths rejected by a synthetic vertical+rise gate (not real-clip accuracy). |
-| Not measured | Real-clip per-behaviour accuracy; `drink` on real clips (hand-position estimate); the posture buddy's neck/torso/shoulders are estimated from head+hand, not measured body pose; multi-session trend on real longitudinal data (unit-test only). |
+| Not measured | Real-clip per-behaviour accuracy; `drink` on real clips (hand-position estimate); the posture buddy's neck is estimated from the measured head angles, not measured body pose, and no body is drawn; multi-session trend on real longitudinal data (unit-test only). |
 | On hold | Best Use of COOL (Marketplace AMI vs our Lambda zip). |
 
 - **No real-clip vision evaluation yet.** All behaviour accuracy is unmeasured; robustness

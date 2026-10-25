@@ -95,7 +95,7 @@ is a capability we cannot show running inside the app.
 4. [`llm_timeout_fallback.md`](traces/llm_timeout_fallback.md) — 계획기가 예산 초과 → 규칙 폴백. 결정적 데모는 FakeLLM 지연으로 재현하고, 실제 Bedrock 호출이 예산을 넘긴 증거는 `agent/llm_calls.jsonl`(2809ms)에 있다 (D2)
 5. [`denied_confirmation_raises_threshold.md`](traces/denied_confirmation_raises_threshold.md) — 사람 '아니오' → 임계 상향·지속 (C4)
 
-재현: `uv run python eval/agent/demo_trace.py` (결정적). LLM 실호출 확인: `--live`(Haiku 4.5, captain, 1콜).
+재현: `uv run python eval/agent/demo_trace.py` (결정적). LLM 실호출 확인: `--live`(Haiku 4.5, `<aws-profile>`, 1콜).
 
 ---
 

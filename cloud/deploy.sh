@@ -36,6 +36,7 @@ CODE_BUCKET_MASK="${STACK}-code-${ACCOUNT_MASK}"
 ZIP="cloud/build/nunchi-service.zip"
 KEY="lambda/nunchi-service.zip"
 API_KEY_PARAM="/nunchi/api-key"
+IP_SALT_PARAM="/nunchi/ip-salt"
 
 run() {  # echo always (account id masked); execute only when --apply
   local shown="$*"
@@ -58,13 +59,19 @@ run "${AWS[@]}" s3api head-bucket --bucket "$CODE_BUCKET" ||
   run "${AWS[@]}" s3api create-bucket --bucket "$CODE_BUCKET"
 run "${AWS[@]}" s3 cp "$ZIP" "s3://$CODE_BUCKET/$KEY"
 
-echo "[4/6] ensure SSM SecureString api key ($API_KEY_PARAM)  — value never printed"
+echo "[4/6] ensure SSM SecureStrings ($API_KEY_PARAM, $IP_SALT_PARAM) — values never printed"
 echo "  (create once, out-of-band, if absent:)"
 echo "  \$ ${AWS[*]} ssm put-parameter --name $API_KEY_PARAM --type SecureString --value \"\$(openssl rand -hex 24)\" --no-overwrite"
+echo "  \$ ${AWS[*]} ssm put-parameter --name $IP_SALT_PARAM --type SecureString --value \"\$(openssl rand -hex 32)\" --no-overwrite"
 if [ "$APPLY" = "1" ]; then
   "${AWS[@]}" ssm get-parameter --name "$API_KEY_PARAM" >/dev/null 2>&1 ||
     "${AWS[@]}" ssm put-parameter --name "$API_KEY_PARAM" --type SecureString \
       --value "$(openssl rand -hex 24)" --no-overwrite >/dev/null
+  # C17: HMAC salt for IP hashing (trial-key per-IP daily limit). Random if absent; the
+  # value is never printed. Only the hash of an IP is ever stored.
+  "${AWS[@]}" ssm get-parameter --name "$IP_SALT_PARAM" >/dev/null 2>&1 ||
+    "${AWS[@]}" ssm put-parameter --name "$IP_SALT_PARAM" --type SecureString \
+      --value "$(openssl rand -hex 32)" --no-overwrite >/dev/null
 fi
 
 echo "[5/6] deploy stack (change-set based, create or update)"
@@ -79,6 +86,7 @@ run "${AWS[@]}" cloudformation deploy \
       "LambdaCodeBucket=$CODE_BUCKET" \
       "LambdaCodeKey=$KEY" \
       "ApiKeyParamName=$API_KEY_PARAM" \
+      "IpSaltParamName=$IP_SALT_PARAM" \
       $BUDGET_ARG \
   --tags project=nunchikochi delete-after=2026-11-30
 

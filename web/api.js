@@ -30,7 +30,14 @@ export class Api {
   async _json(res) {
     // Network/5xx = temporary (recoverable). 4xx / bad shape = hard but UI still recovers.
     if (!res.ok) {
-      throw new ApiError(`HTTP ${res.status}`, { status: res.status, temporary: res.status >= 500 });
+      const err = new ApiError(`HTTP ${res.status}`, { status: res.status, temporary: res.status >= 500 });
+      // Attach the server's structured `error` code when present (e.g. key_expired / key_invalid)
+      // so the UI can distinguish causes. Parsing a short JSON body here keeps no secret in memory.
+      try {
+        const body = await res.clone().json();
+        if (typeof body?.error === "string") err.code = body.error;
+      } catch { /* no/!json body */ }
+      throw err;
     }
     try {
       return await res.json();
@@ -42,6 +49,38 @@ export class Api {
   async health() {
     const res = await this._fetch(`${this.apiBase}/healthz`, { headers: this._headers() });
     return this._json(res);
+  }
+
+  // W21: request a 30-minute trial key. No X-Api-Key, no body (CONTRACTS C17 §API).
+  // On 429 (ip_daily_limit) / 503 (capacity) / any error, throw an ApiError whose `.code` is the
+  // server's `error` field (e.g. "ip_daily_limit", "capacity") so the UI can message precisely.
+  // The returned key is handed back to the caller to hold in memory only — never stored here.
+  async createTrialKey() {
+    let res;
+    try {
+      res = await this._fetch(`${this.apiBase}/v1/keys`, { method: "POST" });
+    } catch (e) {
+      throw e; // network ApiError (status 0, temporary)
+    }
+    if (res.ok) {
+      try {
+        return await res.json(); // {key, expires_at, ttl_s, remaining_today}
+      } catch {
+        throw new ApiError("bad response shape", { status: res.status, temporary: true });
+      }
+    }
+    // error: parse the structured body for the precise cause (don't log/keep it)
+    let code = "";
+    let retryAfter = 0;
+    try {
+      const body = await res.json();
+      code = typeof body?.error === "string" ? body.error : "";
+      retryAfter = Number(body?.retry_after_s) || 0;
+    } catch { /* no/!json body */ }
+    const err = new ApiError(`HTTP ${res.status}`, { status: res.status, temporary: res.status >= 500 });
+    err.code = code;
+    err.retryAfterS = retryAfter;
+    return Promise.reject(err);
   }
 
   async createSession({ clientDate, lang }) {

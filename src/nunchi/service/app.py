@@ -18,14 +18,16 @@ import re
 import time
 from typing import Any
 
-from fastapi import FastAPI, Form, Header, UploadFile
+from fastapi import FastAPI, Form, Header, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from nunchi.contracts import SCHEMA_VERSION, FrameResult, SessionSummary
 
+from . import keys as _keys
 from . import metrics as _metrics
 from .deps import get_services
+from .keys import GlobalLimitError, IpLimitError, make_key_store
 from .state import make_state_store
 from .summary_store import make_summary_store
 
@@ -79,6 +81,19 @@ def _error(code: str, message: str, status: int) -> JSONResponse:
     return JSONResponse(status_code=status, content={"error": {"code": code, "message": message}})
 
 
+def _flat_error(code: str, status: int, extra: dict[str, Any] | None = None) -> JSONResponse:
+    """Flat error shape for the trial-key contract (C17): `{"error":"<code>", ...}`.
+
+    Distinct from `_error` (which nests under error.code) because the key-issuing contract
+    the web (W21) consumes is flat. Still code-only; never a secret, IP, or key value.
+    """
+    _metrics.error(code)
+    body: dict[str, Any] = {"error": code}
+    if extra:
+        body.update(extra)
+    return JSONResponse(status_code=status, content=body)
+
+
 def _rate_limited(state: dict[str, Any], now: float) -> bool:
     """Server-side per-session frame-rate limit. Sliding window on wall-clock timestamps
     kept in the session state (numbers only, no frames). Mutates state in place; returns
@@ -110,6 +125,7 @@ def create_app() -> FastAPI:
 
     store = make_state_store()
     summary_store = make_summary_store()
+    key_store = make_key_store()
     svc = get_services()
 
     # In-process trace & summary buffers (demo scope; CONTRACTS §4 persists summary to DynamoDB in C2+).
@@ -119,14 +135,32 @@ def create_app() -> FastAPI:
 
     def _check_key(x_api_key: str | None) -> JSONResponse | None:
         required = _api_key_required()
+        # Master key (SSM /nunchi/api-key, or local NUNCHI_API_KEY) is always accepted when
+        # configured. When no master key is configured we skip auth (local/dev) — unless an
+        # SSM key was expected but could not be resolved, which fails closed (503).
         if required is None:
-            # Fail closed when an SSM key was expected but could not be resolved.
             if os.environ.get("NUNCHI_API_KEY_PARAM") and not os.environ.get("NUNCHI_API_KEY"):
                 return _error("auth_unavailable", "api key not resolved", 503)
-            return None  # local/dev: no key configured, auth skipped
-        if x_api_key != required:
+            # No master key: if key-issuing is on, still let trial keys through below; else
+            # auth is skipped entirely (pure local dev).
+            if not _keys.key_issuing_enabled():
+                return None
+        elif x_api_key == required:
+            return None  # master key
+
+        # Trial-key path (only when key-issuing is enabled for this deployment).
+        if _keys.key_issuing_enabled() and x_api_key:
+            verdict = key_store.validate(x_api_key)
+            if verdict == "ok":
+                return None
+            if verdict == "key_expired":
+                return _flat_error("key_expired", 401)
+            return _flat_error("key_invalid", 401)
+
+        # No master match and no usable trial key.
+        if required is not None:
             return _error("unauthorized", "missing or invalid api key", 401)
-        return None
+        return _flat_error("key_invalid", 401)
 
     # --- 1. health -------------------------------------------------------
     @app.get("/healthz")
@@ -139,7 +173,34 @@ def create_app() -> FastAPI:
             "arch": os.uname().machine,
             "build": BUILD_SHA,
             "stubs": svc.using_stubs,
+            # Whether this deployment issues 30-min trial keys (web hides the button if false).
+            "key_issuing": _keys.key_issuing_enabled(),
         }
+
+    # --- 1b. issue a 30-min trial key (NO key required) ------------------
+    @app.post("/v1/keys")
+    def issue_key(request: Request):
+        if not _keys.key_issuing_enabled():
+            # This deployment does not issue trial keys (e.g. local service). Not found.
+            return _flat_error("key_issuing_disabled", 404)
+        ip = _source_ip(request)
+        try:
+            issued = key_store.issue(ip)
+        except GlobalLimitError:
+            return _flat_error("capacity", 503)
+        except IpLimitError:
+            return _flat_error(
+                "ip_daily_limit",
+                429,
+                {
+                    "retry_after_s": _keys.seconds_until_utc_midnight(),
+                    "limit": _keys._issue_per_ip_per_day(),
+                },
+            )
+        except Exception:  # noqa: BLE001 - a store failure must not leak internals
+            return _flat_error("issue_failed", 503)
+        _metrics.session_event("key_issue")
+        return issued
 
     # --- 2. create session ----------------------------------------------
     @app.post("/v1/sessions")
@@ -379,6 +440,29 @@ def create_app() -> FastAPI:
 
 
 # --- helpers (module level so tests can target them) ----------------------
+# --- source IP (API Gateway only; X-Forwarded-For is NOT trusted, C17 §1) ---
+def _source_ip(request: Request) -> str:
+    """Return the client IP to rate-limit on.
+
+    Trust ONLY API Gateway HTTP API's `requestContext.http.sourceIp` (set by the gateway,
+    not forgeable by the client). Mangum puts the raw Lambda event in the ASGI scope under
+    `aws.event`. We deliberately ignore `X-Forwarded-For` / `X-Real-IP` (client-forgeable).
+    Local/dev (TestClient, uvicorn) has no AWS event: fall back to the socket peer so the
+    limiter still works in tests. The raw IP never leaves the keys module (hashed there).
+    """
+    event = request.scope.get("aws.event")
+    if isinstance(event, dict):
+        rc = event.get("requestContext") or {}
+        http = rc.get("http") or {}
+        ip = http.get("sourceIp")
+        if ip:
+            return str(ip)
+    client = request.scope.get("client")
+    if client:
+        return str(client[0])
+    return "0.0.0.0"
+
+
 def _new_agent_ctx(svc, session_id: str, lang: str) -> dict[str, Any]:
     """Build the initial agent context as a JSON dict (stored in session state).
 
@@ -652,7 +736,7 @@ def _timeline_for(state: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
 
-def compare(*args, **kwargs):  # noqa: D401 - CONTRACTS name; delegates to the agent helper
+def compare(*args, **kwargs):
     """Lazy delegate to nunchi.agent.compare so the module imports even in stub-only builds."""
     from nunchi.agent import compare as _agent_compare  # type: ignore
 

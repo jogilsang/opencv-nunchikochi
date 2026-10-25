@@ -10,4 +10,4 @@
 | 4 | LLM 타임아웃 → 규칙 폴백 | failure: LLM timeout -> planner=rules | `tests/agent/test_llm_mode.py::test_llm_timeout_falls_back` | [`llm_timeout_fallback.md`](llm_timeout_fallback.md) |
 | 5 | 사람 거부 → 임계 상향(지속) | human reply -> raise_threshold (persists) | `tests/agent/test_guardrails_deep.py::test_denial_raises_threshold_and_persists_across_frames` | [`denied_confirmation_raises_threshold.md`](denied_confirmation_raises_threshold.md) |
 
-재현: `uv run python eval/agent/demo_trace.py` (결정적, 네트워크 없음). LLM 실호출 확인: `--live` (Haiku 4.5, captain, 최대 3콜).
+재현: `uv run python eval/agent/demo_trace.py` (결정적, 네트워크 없음). LLM 실호출 확인: `--live` (Haiku 4.5, `<aws-profile>`, 최대 3콜).

@@ -3,7 +3,7 @@
 // ?mock=1 runs the whole thing with no camera and no server.
 
 import { STRINGS, setLang, getLang, t } from "./i18n.js";
-import { Api } from "./api.js";
+import { Api, ApiError } from "./api.js";
 import { MockApi } from "./mock.js";
 import { DemoApi, DemoLoadError } from "./demo.js";
 import { Capture, CAM, isSecure } from "./capture.js";
@@ -24,6 +24,12 @@ const DEMO_RUN_SECONDS = 75; // within the brief's 60–90s window
 
 // Live-mode access key. Memory only: never written to state, localStorage, the URL, or logs.
 let liveKey = "";
+// W21 trial key (live mode): the key value lives only in `liveKey` above; here we keep just the
+// expiry time + a countdown timer handle. None of this is persisted.
+let trialKeyExpiresAt = 0;      // epoch ms; 0 = no active trial key
+let trialKeyTimer = null;       // setInterval handle for the countdown
+let trialKeyWarned = false;     // one-shot "~5 min left" soft notice
+let keyIssuing = false;         // from /healthz key_issuing — show the "Get a trial key" button
 
 const state = {
   cfg: { apiBase: "http://localhost:8000", apiKey: "", lang: "en", fps: 2 },
@@ -225,6 +231,11 @@ function initStart() {
   // Access key: memory only. We read it into the module-level `liveKey` and never persist it.
   keyInput.addEventListener("input", () => { liveKey = keyInput.value; refresh(); });
 
+  // W21: one-button trial key. On success we fill the (memory-only) key, start the countdown,
+  // and re-gate Start. Errors route to the recoverable screen with a Demo alternative.
+  const trialBtn = document.getElementById("btn-trial-key");
+  if (trialBtn) trialBtn.addEventListener("click", () => requestTrialKey());
+
   consent.addEventListener("change", refresh);
   btn.addEventListener("click", () => {
     if (state.mode === "live") beginSession({ live: true });
@@ -249,17 +260,113 @@ async function checkService() {
   setLiveStatus(statusEl, "", t("liveStatusChecking"), null);
   try {
     const probe = new Api({ apiBase: state.cfg.apiBase, apiKey: liveKey || state.cfg.apiKey, anonId: getAnonId() });
-    const h = await probe.health(); // {ok, cv_version, backend, arch, build}
+    const h = await probe.health(); // {ok, cv_version, backend, arch, build, key_issuing}
     const bits = [];
     if (h && h.arch) bits.push(h.arch);                       // e.g. arm64 (AWS Graviton)
     if (h && h.backend) bits.push(h.backend);                 // e.g. opencv
     if (h && h.cv_version) bits.push("OpenCV " + h.cv_version);
     const runtime = bits.length ? `${t("runtimePrefix")} ${bits.join(" · ")}` : "";
     setLiveStatus(statusEl, "up", t("liveStatusUp"), runtime);
+    // W21: show the "Get a trial key" button only when the server issues keys (false on local).
+    keyIssuing = !!(h && h.key_issuing);
+    updateTrialKeyButton();
   } catch (e) {
     setLiveStatus(statusEl, "down", t("liveUnreachable"), null);
+    keyIssuing = false;
+    updateTrialKeyButton();
   }
   refreshStart();
+}
+
+// Show/hide the trial-key button + IP note based on key_issuing (server-driven). When hidden,
+// the plain access-key input is the only path (local service).
+function updateTrialKeyButton() {
+  const wrap = document.getElementById("trial-key-wrap");
+  if (wrap) wrap.hidden = !keyIssuing;
+}
+
+// Request a 30-minute trial key (POST /v1/keys). The key is held in memory only (`liveKey`),
+// fills the input, and starts a countdown. Precise errors (429 ip_daily_limit / 503 capacity /
+// network) go to the recoverable screen with a Demo alternative.
+async function requestTrialKey() {
+  const btn = document.getElementById("btn-trial-key");
+  const keyInput = document.getElementById("live-key");
+  if (!state.cfg.apiBase) { showError("trial_key_failed", { toDemo: true }); return; }
+  const prevLabel = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = t("trialKeyGetting"); }
+  try {
+    const api = new Api({ apiBase: state.cfg.apiBase, anonId: getAnonId() });
+    const r = await api.createTrialKey(); // {key, expires_at, ttl_s, remaining_today}
+    const key = typeof r?.key === "string" ? r.key : "";
+    if (!key) throw new ApiError("bad response shape", { status: 200, temporary: true });
+    // memory only: fill the input + module var, never persist
+    liveKey = key;
+    if (keyInput) keyInput.value = key;
+    // expiry: prefer expires_at (ISO), else now + ttl_s
+    const exp = Date.parse(r.expires_at);
+    trialKeyExpiresAt = Number.isFinite(exp) ? exp : Date.now() + (Number(r.ttl_s) || 1800) * 1000;
+    trialKeyWarned = false;
+    startTrialCountdown();
+    // re-gate Start now that a key is present
+    document.getElementById("consent").dispatchEvent(new Event("change"));
+  } catch (e) {
+    const code = e && e.code;
+    const status = e && typeof e.status === "number" ? e.status : 0;
+    let kind = "trial_key_failed";
+    if (code === "ip_daily_limit" || status === 429) kind = "ip_daily_limit";
+    else if (code === "capacity" || status === 503) kind = "capacity";
+    showError(kind, { toDemo: true });
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = prevLabel || t("trialKeyGet"); }
+  }
+}
+
+// Countdown for the active trial key. Shows mm:ss (aria-live polite), a one-shot soft notice at
+// ~5 min, and on expiry ends any running session normally (report) before the expiry screen.
+function startTrialCountdown() {
+  stopTrialCountdown();
+  const el = document.getElementById("trial-key-remaining");
+  if (el) el.hidden = false;
+  const tick = () => {
+    const ms = trialKeyExpiresAt - Date.now();
+    if (ms <= 0) { onTrialKeyExpired(); return; }
+    if (el) {
+      const total = Math.floor(ms / 1000);
+      const mm = String(Math.floor(total / 60)).padStart(2, "0");
+      const ss = String(total % 60).padStart(2, "0");
+      el.textContent = fmtTpl(t("trialKeyRemaining"), { mm, ss });
+    }
+    if (!trialKeyWarned && ms <= 5 * 60 * 1000) {
+      trialKeyWarned = true;
+      if (el) el.textContent = (el.textContent ? el.textContent + " — " : "") + t("trialKeyExpiringSoon");
+    }
+  };
+  tick();
+  trialKeyTimer = setInterval(tick, 1000);
+}
+function stopTrialCountdown() {
+  if (trialKeyTimer) { clearInterval(trialKeyTimer); trialKeyTimer = null; }
+}
+
+// The trial key reached its expiry (client clock OR a server 401 key_expired). End a running
+// session normally so the report reflects what was captured, then show the expiry screen.
+function onTrialKeyExpired() {
+  stopTrialCountdown();
+  trialKeyExpiresAt = 0;
+  liveKey = "";                                   // drop the dead key from memory
+  const keyInput = document.getElementById("live-key");
+  if (keyInput) keyInput.value = "";
+  const remEl = document.getElementById("trial-key-remaining");
+  if (remEl) { remEl.hidden = true; remEl.textContent = ""; }
+  const running = document.getElementById("screen-run")?.classList.contains("active");
+  if (running && state.sessionId) {
+    // finish gracefully: stop capture, end the session → report, then surface the expiry screen
+    try { state.capture?.stopPump?.(); } catch {}
+    try { state.capture?.stop?.(); } catch {}
+    endSession().finally(() => showError("key_expired", { toDemo: true }));
+  } else {
+    showError("key_expired", { toDemo: true });
+  }
 }
 
 function setLiveStatus(el, cls, text, runtime) {
@@ -285,6 +392,12 @@ const ERROR_MAP = {
   rate_limited: { title: "err429Title", body: "err429", retry: "retry", showMock: false },
   server: { title: "err5xxTitle", body: "err5xx", retry: "retry", showMock: true },
   expired: { title: "errExpiredTitle", body: "errExpired", retry: "restart", showMock: false },
+  // W21 trial-key specific states (live mode). Each offers a Demo alternative (no key needed).
+  key_expired: { title: "trialKeyExpiredTitle", body: "trialKeyExpiredBody", retry: "restart", showMock: false },
+  key_invalid: { title: "keyInvalidTitle", body: "keyInvalidBody", retry: "restart", showMock: false },
+  ip_daily_limit: { title: "ipDailyLimitTitle", body: "ipDailyLimitBody", retry: "retry", showMock: false },
+  capacity: { title: "capacityTitle", body: "capacityBody", retry: "retry", showMock: false },
+  trial_key_failed: { title: "err5xxTitle", body: "trialKeyGetFailed", retry: "retry", showMock: false },
 };
 
 // Map an ApiError (status) to an error kind.
@@ -297,17 +410,39 @@ function errorKindFromStatus(status) {
   return "server";
 }
 
-function showError(kind, { onRetry } = {}) {
+function showError(kind, { onRetry, toDemo = false } = {}) {
   const cfg = ERROR_MAP[kind] || ERROR_MAP[CAM.ERROR];
   document.getElementById("camerr-title").textContent = t(cfg.title);
   document.getElementById("camerr-body").textContent = t(cfg.body);
   const retryBtn = document.getElementById("btn-retry");
   const mockBtn = document.getElementById("btn-tomock");
   retryBtn.textContent = t(cfg.retry);
-  retryBtn.onclick = onRetry || (() => beginSession());
-  mockBtn.hidden = !cfg.showMock;
+  // W21 trial-key states: "retry" means go back to the start screen (get a new key / wait),
+  // and the secondary button starts Demo mode (no key). Camera/server states keep their old
+  // behaviour (retry = beginSession, secondary = mock preview).
+  if (toDemo) {
+    retryBtn.onclick = onRetry || (() => { show("screen-start"); });
+    mockBtn.hidden = false;
+    mockBtn.textContent = t("toDemoMode");
+    mockBtn.onclick = () => { setStartMode("demo"); beginSession(); };
+  } else {
+    retryBtn.onclick = onRetry || (() => beginSession());
+    mockBtn.hidden = !cfg.showMock;
+    mockBtn.textContent = t("tryMock");
+    mockBtn.onclick = () => beginSession({ forceMock: true });
+  }
   show("screen-camerror");
   retryBtn.focus();
+}
+
+// Set the start-screen mode selection programmatically (used by the Demo alternative on the
+// trial-key error screens so a following beginSession() runs the demo path).
+function setStartMode(mode) {
+  state.mode = mode;
+  const demoCard = document.getElementById("mode-demo");
+  const liveCard = document.getElementById("mode-live");
+  if (demoCard) demoCard.setAttribute("aria-checked", String(mode === "demo"));
+  if (liveCard) liveCard.setAttribute("aria-checked", String(mode === "live"));
 }
 
 // kept name for camera statuses; delegates to showError
@@ -316,10 +451,8 @@ function showCamError(status) {
 }
 
 function initCamError() {
-  document.getElementById("btn-retry").addEventListener("click", () => beginSession());
-  document.getElementById("btn-tomock").addEventListener("click", () => {
-    beginSession({ forceMock: true });
-  });
+  // Button handlers are assigned per-call in showError() (they differ for camera/server vs the
+  // W21 trial-key states), so no static listeners here — avoids double-firing beginSession.
 }
 
 // ---------- session lifecycle ----------
@@ -648,13 +781,22 @@ function startRun() {
         setTimeout(() => endSession(), 700); // small beat so the last frame is visible
       }
     } catch (e) {
-      // Classify: hard errors (auth/expired) → full error screen; transient → banner + backoff.
+      // Classify: hard errors (auth/expired/invalid) → full error screen; transient → banner + backoff.
       const status = e && typeof e.status === "number" ? e.status : 0;
-      const kind = errorKindFromStatus(status);
-      if (kind === "unauthorized" || kind === "expired") {
+      const code = e && e.code;
+      // W21: a 401 can mean the trial key expired (key_expired) or was never valid (key_invalid).
+      if (status === 401 || status === 403) {
         state.capture.stopPump();
         state.capture.stop();
-        showError(kind, kind === "expired" ? { onRetry: () => beginSession() } : undefined);
+        if (code === "key_invalid") { stopTrialCountdown(); trialKeyExpiresAt = 0; liveKey = ""; showError("key_invalid", { toDemo: true }); }
+        else { onTrialKeyExpired(); } // key_expired (or generic auth) → end gracefully + expiry screen
+        return;
+      }
+      const kind = errorKindFromStatus(status);
+      if (kind === "expired") {
+        state.capture.stopPump();
+        state.capture.stop();
+        showError(kind, { onRetry: () => beginSession() });
         return;
       }
       // transient (offline/server/rate limit): keep running, show banner; pump backs off on throw
@@ -1681,6 +1823,13 @@ function initLang() {
     // We return only booleans/length — never the key value itself.
     hasLiveKey: () => liveKey.length > 0,
     liveKeyLen: () => liveKey.length,
+    // W21 trial-key test hooks (value is never exposed — only presence/time/state).
+    trialKeyActive: () => trialKeyExpiresAt > 0,
+    trialKeyRemainingMs: () => (trialKeyExpiresAt > 0 ? Math.max(0, trialKeyExpiresAt - Date.now()) : 0),
+    trialKeyBtnVisible: () => { const w = document.getElementById("trial-key-wrap"); return !!w && !w.hidden; },
+    // force the trial key to expire now (fast-forward) so e2e can test the expiry path without waiting
+    forceTrialKeyExpire: () => { if (trialKeyExpiresAt > 0) { trialKeyExpiresAt = Date.now() - 1; onTrialKeyExpired(); } },
+    getTrialKey: () => requestTrialKey(),
     // test helpers: drive error states + inspect agent log (no real failures needed)
     showError: (kind) => showError(kind),
     errorKindFromStatus,
@@ -1691,14 +1840,17 @@ function initLang() {
     buddyIs3D: () => !!(state.buddy && state.buddy.mode3d),
     buddyExaggeration: () => EXAGGERATION,
     buddyState: () => (state.buddy ? describePose(state.buddy._lastPose, t) : ""),
-    // W14: report the figure's parts (head/neck/shoulders/arms/…), triangle budget, and the
-    // smoothed right-arm raise (0..1) so tests can see the drink gesture move the arm.
+    // W20: report the figure's parts (head/neck/face/shoulderHint), triangle budget, the
+    // smoothed neck bend + forward offset, the shown facial expression (0..1 channels), and
+    // whether the drink cup/chip is showing — so tests can see expression + neck react.
     buddyParts: () => (state.buddy ? state.buddy.parts() : []),
     buddyTriangles: () => (state.buddy ? (state.buddy.triangleCount || 0) : 0),
-    buddyArmRaise: () => (state.buddy ? Number((state.buddy.shown?.rightArmRaise ?? 0).toFixed(3)) : 0),
-    buddyTorsoLean: () => (state.buddy ? Number((state.buddy.shown?.torsoLean ?? 0).toFixed(3)) : 0),
+    buddyNeckBend: () => (state.buddy ? Number((state.buddy.shown?.neckBend ?? 0).toFixed(3)) : 0),
+    buddyHeadOffset: () => (state.buddy ? Number((state.buddy.shown?.headOffset ?? 0).toFixed(3)) : 0),
+    buddyExpr: () => (state.buddy ? state.buddy.exprShown() : null),
+    buddyFaceMetrics: () => (state.buddy ? state.buddy.faceMetrics() : null),
+    buddyDrinkingShown: () => !!(state.buddy && state.buddy.target && state.buddy.target.drinking),
     setBuddyDrinking: (on) => { if (on) markDrinking(); else state.drinkUntil = 0; if (state.buddy) state.buddy.setDrinking(!!on); },
-    forceBuddyArmRaise: (v) => { if (state.buddy) state.buddy.forceArmRaise(v); },
     poseTrackLen: () => state.poseTrack.length,
     reportBuddyReady: () => !!state.reportBuddy,
     rewindScrub: (frac) => {

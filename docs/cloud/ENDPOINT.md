@@ -14,7 +14,7 @@ The API key lives only in SSM SecureString `/nunchi/api-key`.
 | API key | SSM SecureString `/nunchi/api-key` (header `X-Api-Key`) — never in this repo |
 
 Health (public, no key): `curl https://54hlt77s4k.execute-api.us-east-1.amazonaws.com/healthz`
-→ `{"ok":true,"cv_version":"5.0.0","backend":"opencv","arch":"aarch64","stubs":false}`
+→ `{"ok":true,"cv_version":"5.0.0","backend":"opencv","arch":"aarch64","stubs":false,"key_issuing":true}`
 
 ## Public entry point: API Gateway (Function URL was org-SCP-blocked)
 
@@ -76,3 +76,82 @@ collapses on short sessions) + W19 (short sessions still show the bad-posture co
 with a "not comparable yet" note). CloudFront `/*` invalidated. All 16 deployable files
 hash-match the source (mismatch 0). **No server/template/resource change** — `/healthz` 200,
 no-key 401, CORS preflight still allows `x-anon-id`; `web/config.json` apiBase only.
+
+## C17 — 30-minute trial-key issuing (2026-10-25)
+
+Same stack/region/prefix/tags; **service code + template config only, no new resource
+kind** (the DynamoDB item format is extended inside the existing `nunchi-sessions` table).
+Judges no longer need a shared key: the live page's "Get a trial key" button calls a new
+**public** endpoint that mints a 30-minute key. Abuse guards: per-IP **3/UTC-day**, global
+**6/UTC-day** (user decision 2026-10-25, env `NUNCHI_KEY_GLOBAL_DAILY`, default 6). Mem
+1536 / timeout 15 / reserved concurrency 5 / cost alarm / SSM master key all unchanged.
+
+### API
+
+- `POST /v1/keys` (**no key required**, empty body):
+  - 200 `{"key":"<64 hex>","expires_at":"<ISO8601 Z>","ttl_s":1800,"remaining_today":<n>}`
+  - 429 `{"error":"ip_daily_limit","retry_after_s":<to next UTC 00:00>,"limit":3}`
+  - 503 `{"error":"capacity"}` when the global daily cap (6) is exhausted
+- All other `/v1/*` routes still take `X-Api-Key`. A trial key that is **expired** → 401
+  `{"error":"key_expired"}`; an unknown key → 401 `{"error":"key_invalid"}`. The SSM master
+  key (`/nunchi/api-key`) stays valid for ops/local.
+- `GET /healthz` (public) now also returns `"key_issuing": true` (the web uses this to show
+  the button; a local service leaves it false and hides it).
+
+### Privacy (what is stored)
+
+- **IP**: only `requestContext.http.sourceIp` from API Gateway is trusted (never
+  `X-Forwarded-For`). The raw IP is **never** stored, logged, or traced — only a keyed
+  **HMAC-SHA256** of it (salt from SSM SecureString `/nunchi/ip-salt`, random if absent).
+  The per-IP daily counter is `IP#<hash>#<YYYY-MM-DD>` (TTL 48h).
+- **Key**: the plaintext key is never stored — only `KEY#<sha256(key)>` with `expires_at`.
+  Validation compares `expires_at` **in code**; DynamoDB TTL deletion lags hours and is
+  never trusted for correctness (the item carries a ~1h cushion past expiry).
+- **Access logs**: the API Gateway access-log format **no longer carries the client IP**
+  (the `ip` field was removed); it keeps only requestId/time/method/path/status/len/latency.
+- Counters use an **atomic conditional increment** (`ADD n` with `n < cap`), so a concurrent
+  burst can never push a count past the cap (no read-then-write race).
+
+### Deploy + live verification (captain / us-east-1)
+
+- Template diff (change set): Add `HttpApiKeysRoute` (`POST /v1/keys`), Modify `HttpApiStage`
+  (per-route throttle rate 2 / burst 5 on `POST /v1/keys` + access-log format minus `ip`),
+  Modify `ServiceFunction` (new env: `NUNCHI_KEY_ISSUING=1`, `NUNCHI_IP_SALT_PARAM`,
+  `NUNCHI_KEY_IP_DAILY=3`, `NUNCHI_KEY_GLOBAL_DAILY=6`), Modify `ServiceRole`
+  (+`dynamodb:UpdateItem` for the conditional counters, +`ssm:GetParameter` on the ip-salt
+  param). **No replacements** — no data loss; DynamoDB table/CloudFront/alarms/concurrency
+  untouched. New SSM SecureString `/nunchi/ip-salt` provisioned out-of-band (value never
+  printed).
+- Live curl: `/healthz` `key_issuing:true`; `POST /v1/keys` ×3 → 200 with
+  `remaining_today` 2→1→0 and `ttl_s=1800`, 4th → **429 ip_daily_limit**; an issued key →
+  `POST /v1/sessions` **200**; an invalid key → **401 key_invalid**; master SSM key →
+  **200**, no key → **401**. The 30-minute **expiry** is proven by unit tests (clock
+  injected), not by waiting live.
+- DynamoDB scan after issuance: items are `KEY#<sha256>` (attrs `expires_at,ttl` only),
+  `IP#<hmac>#<date>` (`n`), `DAY#<date>` (`n`) — **no raw IPv4, no raw key** anywhere.
+
+### Honest limitations
+
+- A **shared/NAT IP** (office, campus, conference Wi-Fi) shares the 3/day budget across
+  everyone behind it, so colleagues may see `ip_daily_limit` sooner than expected.
+- A **mobile** client whose IP changes (cell ↔ Wi-Fi) is treated as a new IP and may need a
+  fresh key, but also gets a fresh 3/day allowance.
+- A **bot flood from many IPs** can exhaust the global **6/day** cap; after that,
+  `POST /v1/keys` returns 503 `capacity` until the next UTC day — but the **master-key path
+  and the demo (no-camera) mode are unaffected**, so a judge can still be handed access.
+- Deployed via `lambda update-function-code` after the change set, because the Lambda S3
+  key is unchanged (the documented C3 gotcha): CloudFormation does not re-pull a same-key
+  zip, so the code push is explicit.
+
+## C19 — web (W20/W21/W22) redeploy (2026-10-25)
+
+Same stack/region/prefix/tags. **Web static only, no server/template/resource change.**
+Re-synced the W20 face+neck buddy, the expression redraw, and the one-button 30-min
+trial-key UI (web commit d3cd8d3). CloudFront `/*` invalidated; all 33 deployable files
+hash-match the CloudFront-served bytes (**mismatch 0**); `/` and `/?demo=1` 200. CORS
+preflight for `POST /v1/keys` and `POST /v1/sessions` (Origin = CloudFront) both 200 with
+the CloudFront origin + `content-type,x-anon-id,x-api-key`; `/healthz` 200 `key_issuing:true`,
+no-key 401. Screenshots `docs/screenshots/c19-{demo-buddy,live-trialkey-button,mobile}.png`
+(pageerror 0; `POST /v1/keys` not called — button presence confirmed by UI + `/healthz`).
+One stale S3 object noted for a future cleanup: `e2e/capture-w14.mjs` (source removed;
+`--delete` not used).

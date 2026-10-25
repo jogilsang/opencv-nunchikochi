@@ -365,3 +365,141 @@ note). W18/W19 web commits at 9541d88.
   `docs/screenshots/c16-{desktop,mobile}-report.png` — demo report posture-record card
   (5/10/30/60 buckets, ~21.6/h) + earlier-session trend; opened and eyeballed. Temp capture
   script not committed. Lambda / concurrency 5 / env / SSM key / cost alarms untouched.
+
+
+## C17 — 30-minute trial-key issuing, redeploy, 2026-10-25
+
+Same stack `nunchi` (captain / us-east-1). **Service code + template config only — no new
+resource kind** (trial-key items live in the existing `nunchi-sessions` table). Mem 1536 /
+timeout 15 / reserved concurrency 5 / cost alarm / SSM master key all unchanged. Account id
+masked everywhere.
+
+### What changed (cloud-owned)
+
+- `src/nunchi/service/keys.py` (new): Memory/Dynamo trial-key store. Issue mints a 64-hex
+  key (TTL 30 min); per-IP cap 3/UTC-day, global cap **6**/UTC-day (user decision 2026-10-25,
+  env `NUNCHI_KEY_GLOBAL_DAILY`). Counters use an atomic conditional `ADD n` (`n < cap`), so
+  a burst can never exceed the cap. IP stored only as a keyed HMAC-SHA256 (salt from SSM
+  `/nunchi/ip-salt`); key stored only as `KEY#<sha256(key)>`; expiry checked in code, not via
+  DynamoDB TTL.
+- `src/nunchi/service/app.py`: `POST /v1/keys` (no key required), `key_issuing` in `/healthz`,
+  trial-key validation in `_check_key` (expired → 401 `key_expired`, unknown → 401
+  `key_invalid`; master SSM key still valid), source IP from `requestContext.http.sourceIp`
+  only (X-Forwarded-For ignored). Flat error shape for the key contract (`{"error":"code"}`).
+- `cloud/template.yaml`: `HttpApiKeysRoute` (`POST /v1/keys`) + stage per-route throttle
+  (rate 2 / burst 5) + `DependsOn` so the route exists before the stage settings reference it;
+  access-log format **minus the `ip` field** (privacy); Lambda env (`NUNCHI_KEY_ISSUING=1`,
+  `NUNCHI_IP_SALT_PARAM`, `NUNCHI_KEY_IP_DAILY=3`, `NUNCHI_KEY_GLOBAL_DAILY=6`); role gains
+  `dynamodb:UpdateItem` (conditional counters) + `ssm:GetParameter` on the ip-salt param;
+  new `IpSaltParamName` param + output.
+- `cloud/deploy.sh`: provisions `/nunchi/ip-salt` SecureString (random if absent; never
+  printed) alongside the api-key, passes `IpSaltParamName`.
+
+### Deploy (change-set based)
+
+1. `create-change-set` #1 → execute → **UPDATE_ROLLBACK_FAILED**. Cause: CloudFormation
+   updated `HttpApiStage` in parallel with adding `HttpApiKeysRoute`, and API Gateway
+   rejected the route-settings key `POST /v1/keys` as NotFound (route not yet created).
+2. Recovered: `continue-update-rollback --resources-to-skip HttpApiStage ServiceRole` →
+   **UPDATE_ROLLBACK_COMPLETE** (verified the live API had only `$default` and no orphan
+   route settings).
+3. Fix (owned `cloud/template.yaml`): `HttpApiStage` `DependsOn: HttpApiKeysRoute`. cfn-lint 0.
+4. `create-change-set` #2 → execute → **UPDATE_COMPLETE** (Add HttpApiKeysRoute; Modify
+   HttpApiStage, ServiceFunction, ServiceRole; **no replacements**).
+5. `/healthz` still showed `key_issuing` absent and `/v1/keys` 404-shaped → the Lambda **code**
+   was stale (same S3 key, C3 gotcha: CFN does not re-pull a same-key zip). `lambda
+   update-function-code` from the uploaded zip (CodeSize 57,142,667 → 57,153,194).
+6. `/v1/keys` then 503 `issue_failed`. Cause: the role lacked `dynamodb:UpdateItem` (the
+   conditional counters). Added it (owned template, service's own least-privilege role on its
+   own table — in-scope, not an account/org IAM change). change-set #3 → **UPDATE_COMPLETE**.
+
+### Smoke (PUBLIC, over the internet; keys kept in shell vars, never printed)
+
+| check | result |
+|---|---|
+| `GET /healthz` | 200 — `key_issuing:true`, cv 5.0.0, aarch64, stubs false |
+| `POST /v1/keys` ×3 | 200 — `ttl_s:1800`, `remaining_today` 2→1→0, 64-hex key, `expires_at` ISO-Z |
+| `POST /v1/keys` 4th (same IP) | **429** `{"error":"ip_daily_limit","retry_after_s":…,"limit":3}` |
+| issued key → `POST /v1/sessions` | 200 (session created) |
+| invalid key → `POST /v1/sessions` | 401 `{"error":"key_invalid"}` |
+| master SSM key → `POST /v1/sessions` | 200 (ops path intact) |
+| no key → `POST /v1/sessions` | 401 |
+| **30-min expiry** | NOT waited live — proven by unit tests (clock injected); `KEY#` row persists past expiry and is rejected by the `expires_at` check, not by TTL deletion |
+| **global 6/day → 503 capacity** | NOT driven live (would burn the day's cap from ≥6 IPs); proven by unit + moto tests; the live `DAY#<date>` counter (`n`) confirms global tracking |
+
+### Privacy (verified live)
+
+- `dynamodb scan nunchi-sessions`: trial-key items are `KEY#<sha256>` (attrs `expires_at,ttl`
+  only), `IP#<hmac>#<date>` (`n`), `DAY#<date>` (`n`) — **no raw IPv4, no raw key** present.
+- API Gateway access-log format: `requestId/time/method/path/status/len/latency` — **no `ip`**,
+  no body, no headers, no key.
+- `POST /v1/keys` route throttle rate 2 / burst 5 confirmed on the live stage.
+
+### Tests
+
+`uv run pytest tests/service` → **63 passed** (was 44; +19 in `tests/service/test_trial_keys.py`:
+issue→validate, per-IP 4th 429, different-IP isolation, expiry boundary before TTL deletion,
+global-cap 503, unknown→invalid, no-raw-ip/key-stored, HTTP 200/429/503/404 shapes, master key
+still valid, store-failure 503 while master survives, source-IP extractor ignores X-Forwarded-For,
+and moto-backed DynamoDB atomic-cap + read-failure-fail-closed). `test_no_persist` and
+`test_privacy_q2_adversarial` still green. ruff clean on the changed files.
+
+
+## C18 — overlay.expr (V14) pass-through verified, NO redeploy, 2026-10-25
+
+Same stack `nunchi` (captain / us-east-1). **No service/template/resource change — "변경 없음
+확인".** V14 added `result.overlay.expr = {eye_l, eye_r, mouth_open, smile, brow_raise}`
+(0..1 or null). The service already returns `result.to_dict()` verbatim, so `overlay.expr`
+rides the frame response exactly like `overlay.pose` — no reshaping, no filter in the
+cloud-owned path. The C17-deployed zip already contains V14's `engine.py` (expr code present),
+so there was nothing to connect and no code to push.
+
+### Verified
+
+- Tests (`tests/service/test_overlay_expr.py`, 5): STUB path forwards `overlay.expr`
+  verbatim (and `overlay=None` is passed through, not fabricated); REAL-ENGINE path through
+  the live HTTP stack on a cached public face sample yields `overlay.expr` with 5 fields,
+  each 0..1 or null; privacy counter-example proves a MARKED expr value appears ONLY in the
+  frame response and is absent from the persisted session state (held MemoryStateStore), the
+  trace, EMF metrics stdout, and the persisted summary; the USER#/DAY# `sanitize_summary`
+  whitelist drops any `overlay`/`expr` top key. `uv run pytest tests/service tests/review`
+  → **71 passed** (was 66). `test_no_persist` + `test_privacy_q2_adversarial` still green.
+- Live (direct curl, master key from SSM into a shell var only — `/v1/keys` NOT called, per
+  the C17 daily-cap note): real face frame → response `result.overlay` has
+  `expr` with `{brow_raise, eye_l, eye_r, mouth_open, smile}`, all 0..1 or null, alongside
+  `pose`/`face`/`points`/`contour`.
+- Invariants unchanged: reserved concurrency 5, 4 `nunchi-*` alarms, SSM master key
+  `/nunchi/api-key`, Lambda CodeSize 57,153,194 (identical to C17 — confirms no redeploy).
+
+
+## C19 — web (W20/W21/W22) CloudFront redeploy, 2026-10-25
+
+Same stack `nunchi` (captain / us-east-1). **Web static only — no server/template/resource
+change** (server already carries V14 expr via C18 and the trial-key endpoint via C17; web
+commits at d3cd8d3: face+neck buddy W20, expression redraw, one-button 30-min trial key W21/W22).
+
+- `s3 sync web/` (exclude config.json / config.example.json / *.md, **no `--delete`**)
+  uploaded 13 changed files: app.js, i18n.js, index.html, styles.css, api.js, buddy.js,
+  buddy-kinematics.js, buddy-kinematics.test.mjs, assets/pose-fixture.json, e2e/run.mjs,
+  e2e/capture-w20.mjs, e2e/capture-w21.mjs, e2e/capture-w22.mjs. `web/config.json` re-written
+  apiBase-only (no key) and `s3 cp` explicitly. CloudFront `/*` invalidation waited to Completed.
+- **Hash compare deployed (via CloudFront) vs local (`shasum -a 256`, all 33 deployable
+  files incl. config.json + vendor three): MISMATCH = 0.** `/` 200, `/?demo=1` 200,
+  `/config.json` 200 (apiBase only, no key), `/index.html` 200.
+- **Stale-file report (not deleted, `--delete` not used):** one genuinely stale object
+  remains in S3 — `e2e/capture-w14.mjs` (its source capture script was removed from the repo).
+  `buddy.js` / `buddy-kinematics.js` / `vendor/three.*` are NOT removed — they still exist in
+  `web/` and were re-uploaded, so the brief's "deleted buddy/vendor" did not occur in this
+  web change. Candidate for a future `--delete` sweep: `e2e/capture-w14.mjs` only.
+- API unchanged: `/healthz` 200 (`key_issuing:true`), no-key `POST /v1/sessions` 401, CORS
+  preflight `OPTIONS /v1/keys` and `OPTIONS /v1/sessions` (Origin = CloudFront) both 200 with
+  `access-control-allow-origin` = the CloudFront domain, methods `GET,OPTIONS,POST`, headers
+  `content-type,x-anon-id,x-api-key`.
+- Playwright screenshots of the **deployed** URL (pageerrors 0), opened and eyeballed:
+  `docs/screenshots/c19-demo-buddy.png` (demo run-screen face+neck buddy, "eyes closed"
+  expression, view/rewind controls), `c19-live-trialkey-button.png` (live mode showing the
+  "Get a trial key (30 min)" button + IP-hash/48h privacy note + Connected aarch64 · OpenCV
+  5.0.0), `c19-mobile.png` (390px, button visible, no overflow). **`POST /v1/keys` was NOT
+  called** (daily cap in use): the button presence was verified by UI render + `/healthz`
+  `key_issuing:true` only. Temp capture script not committed. Lambda / concurrency 5 / env /
+  SSM key / cost alarms untouched.

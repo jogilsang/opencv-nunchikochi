@@ -345,6 +345,14 @@ body.has-demo-strip { padding-bottom: 60px; }
 .live-status.down { color: var(--danger); }
 .live-status.down .led { background: var(--danger); }
 .live-status .runtime { color: var(--muted); font-variant-numeric: tabular-nums; }
+/* W21 trial key */
+.trial-key { display: grid; gap: 6px; margin: 2px 0 2px; }
+.trial-key-btn { justify-self: start; }
+.trial-key-ipnote { color: var(--muted); font-size: 11.5px; margin: 0; line-height: 1.45; }
+.trial-key-remaining {
+  font-size: 12.5px; margin: 2px 0 0; color: var(--fg);
+  font-variant-numeric: tabular-nums; line-height: 1.45; overflow-wrap: anywhere;
+}
 .start-hint { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
 .start-hint.warn { color: var(--warn); }
 
@@ -396,7 +404,12 @@ body.has-demo-strip { padding-bottom: 60px; }
 .chip-btn:hover { border-color: var(--accent); }
 .buddy-rotate-hint { margin: 8px 0 0; color: var(--muted); font-size: 11.5px; }
 .buddy-ghost-legend { margin: 6px 0 0; color: #8fd0ff; font-size: 11.5px; }
-.buddy-state { margin: 6px 0 2px; color: var(--fg); font-size: 13px; min-height: 2.6em; line-height: 1.4; overflow-wrap: anywhere; }
+.buddy-state {
+  margin: 8px 0 4px; color: var(--fg); font-size: 13px; line-height: 1.45;
+  /* grow to fit the full status (up to ~4 lines on forward-head) — height is automatic, never
+     truncated. A comfortable min keeps the layout from jumping between short/long states. */
+  min-height: 2.9em; overflow-wrap: anywhere; overflow: visible;
+}
 
 @media (max-width: 680px) {
   .buddy-canvas { height: 260px; }

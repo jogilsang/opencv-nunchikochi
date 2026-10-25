@@ -28,6 +28,14 @@ Parameters:
     Description: >-
       SSM Parameter Store name (SecureString) that holds the app X-Api-Key. The VALUE is
       created out-of-band by deploy.sh (never in this template/logs). Lambda reads it at runtime.
+  IpSaltParamName:
+    Type: String
+    Default: /nunchi/ip-salt
+    Description: >-
+      SSM SecureString name holding the HMAC salt used to key-hash client IPs for the C17
+      trial-key per-IP daily limit. VALUE is created out-of-band by deploy.sh (random if
+      absent); never in this template/logs. Lambda reads it at runtime. Only the hash of an
+      IP is ever stored (raw IP never persisted/logged/traced).
   LambdaMemoryMB:
     Type: Number
     Default: 1536
@@ -196,15 +204,17 @@ Resources:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
-                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:DeleteItem, dynamodb:Query]
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem, dynamodb:Query]
                 Resource: !GetAtt Table.Arn
-        - PolicyName: read-api-key
+        - PolicyName: read-ssm-params
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action: ssm:GetParameter
-                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApiKeyParamName}"
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApiKeyParamName}"
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${IpSaltParamName}"
       Tags:
         - { Key: project, Value: nunchikochi }
         - { Key: delete-after, Value: !Ref DeleteAfter }
@@ -232,6 +242,11 @@ Resources:
           NUNCHI_MODELS_DIR: /var/task/models
           NUNCHI_API_KEY_PARAM: !Ref ApiKeyParamName
           NUNCHI_CORS_ORIGINS: !Sub "https://${WebDistribution.DomainName}"
+          # C17: issue 30-min trial keys from the live page (judges need no shared key).
+          NUNCHI_KEY_ISSUING: "1"
+          NUNCHI_IP_SALT_PARAM: !Ref IpSaltParamName
+          NUNCHI_KEY_IP_DAILY: "3"           # per-IP issuances per UTC day
+          NUNCHI_KEY_GLOBAL_DAILY: "6"       # global issuances per UTC day (user decision 2026-10-25)
       Tags:
         - { Key: project, Value: nunchikochi }
         - { Key: delete-after, Value: !Ref DeleteAfter }
@@ -272,8 +287,21 @@ Resources:
       RouteKey: "$default"
       Target: !Sub "integrations/${HttpApiIntegration}"
 
+  # Dedicated route for the key-issuing endpoint so it can carry its OWN low throttle
+  # (C17 §3). Same Lambda integration; only the per-route rate/burst differ.
+  HttpApiKeysRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "POST /v1/keys"
+      Target: !Sub "integrations/${HttpApiIntegration}"
+
   HttpApiStage:
     Type: AWS::ApiGatewayV2::Stage
+    # The stage's RouteSettings reference "POST /v1/keys", so that route must exist first.
+    # Without this, CloudFormation updates the stage in parallel with adding the route and
+    # API Gateway rejects the route-settings key as NotFound (observed in C17 deploy #1).
+    DependsOn: HttpApiKeysRoute
     Properties:
       ApiId: !Ref HttpApi
       StageName: "$default"
@@ -282,10 +310,18 @@ Resources:
       DefaultRouteSettings:
         ThrottlingRateLimit: 20
         ThrottlingBurstLimit: 40
+      # Even lower throttle on the key-issuing route (C17 §3): keys are issued rarely, so a
+      # small rate/burst here is an extra abuse guard in front of the app's daily caps.
+      RouteSettings:
+        "POST /v1/keys":
+          ThrottlingRateLimit: 2
+          ThrottlingBurstLimit: 5
       AccessLogSettings:
         DestinationArn: !GetAtt ApiAccessLogGroup.Arn
-        # Minimal fields only — NO request/response body, no headers (privacy).
-        Format: '{"rid":"$context.requestId","t":"$context.requestTime","ip":"$context.identity.sourceIp","m":"$context.httpMethod","p":"$context.path","s":"$context.status","len":"$context.responseLength","ms":"$context.responseLatency"}'
+        # Minimal fields only — NO request/response body, no headers, NO client IP (C17
+        # §5 privacy: the trial-key limiter stores only a keyed hash of the IP; the raw IP
+        # must not sit in access logs either).
+        Format: '{"rid":"$context.requestId","t":"$context.requestTime","m":"$context.httpMethod","p":"$context.path","s":"$context.status","len":"$context.responseLength","ms":"$context.responseLatency"}'
       Tags: { project: nunchikochi, delete-after: !Ref DeleteAfter }
 
   ApiAccessLogGroup:
@@ -485,6 +521,9 @@ Outputs:
   ApiKeyParamName:
     Description: SSM SecureString name holding the X-Api-Key (value set out-of-band).
     Value: !Ref ApiKeyParamName
+  IpSaltParamName:
+    Description: SSM SecureString name holding the IP-hash salt for the C17 trial-key limiter (value set out-of-band).
+    Value: !Ref IpSaltParamName
   DashboardName:
     Description: CloudWatch dashboard (latency, decisions, errors, throttles).
     Value: !Ref Dashboard

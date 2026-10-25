@@ -668,8 +668,8 @@ async function main() {
     await page.close();
   }
 
-  // ---- 3c2. W14: sitting upper-body figure — parts, honesty line, drink, hold, triangles ----
-  group("sitting buddy (W14)");
+  // ---- 3c2. W20: face + neck figure — parts, honesty line, expression, drink chip, hold ----
+  group("face+neck buddy (W20)");
   {
     const page = await desktop.newPage();
     const pageErrors = [];
@@ -683,7 +683,7 @@ async function main() {
     await page.waitForFunction(() => window.__nunchi && window.__nunchi.buddyReady(), null, { timeout: 10000 });
     // take manual control of the buddy (stops the fixture feed overwriting our poses)
     await page.evaluate(() => window.__nunchi.setBuddyPose({ yaw_deg: 0, pitch_deg: 0, roll_deg: 0, depth: 1, conf: 0.97 }));
-    await check("figure parts match the active render mode (3D figure or 2D fallback)", async () => {
+    await check("figure parts are face + neck only — no body/arms/desk (or the 2D fallback)", async () => {
       // Read mode + parts + triangles atomically so they can't disagree across round-trips
       // (the WebGL context can init to 3D or, under software GL, fall back to 2D by design).
       const snap = await page.evaluate(() => ({
@@ -692,40 +692,118 @@ async function main() {
         tris: window.__nunchi.buddyTriangles(),
       }));
       if (snap.is3d) {
-        for (const p of ["head", "neck", "shoulders", "chest", "rightArm", "leftArm", "desk"]) {
+        for (const p of ["head", "neck", "face"]) {
           assert(snap.parts.includes(p), `missing 3D part: ${p} (got ${snap.parts.join(",")})`);
+        }
+        // the body is gone: these parts must NOT be drawn anymore
+        for (const gone of ["chest", "rightArm", "leftArm", "hand", "desk", "shoulders"]) {
+          assert(!snap.parts.includes(gone), `removed part still present: ${gone} (got ${snap.parts.join(",")})`);
         }
         assert(snap.tris > 0 && snap.tris <= 4000, `triangle budget out of range: ${snap.tris}`);
       } else {
-        // graceful, by-design 2D fallback (software GL may refuse a context): a flat angle icon
+        // graceful, by-design 2D fallback (software GL may refuse a context): a flat face icon
         assert(snap.parts.includes("head2d"), `2D fallback should report head2d (got ${snap.parts.join(",")})`);
       }
     });
-    await check("honesty line is shown: head+hand measured, neck+torso estimated, no legs", async () => {
+    await check("honesty line is shown: head+expression measured, neck estimated, no body", async () => {
       const note = (await page.textContent(".buddy-measured-note"))?.trim() || "";
-      assert(/measured/i.test(note) && /estimate/i.test(note) && /legs/i.test(note),
-        `measured/estimated/legs disclosure missing: "${note}"`);
+      assert(/measured/i.test(note) && /estimate/i.test(note) && /body/i.test(note) && /expression/i.test(note),
+        `measured/expression/estimated/body disclosure missing: "${note}"`);
     });
     await check("accessibility: canvas is role=img with a live aria-label (either mode)", async () => {
       assert((await page.getAttribute("#buddy-canvas", "role")) === "img", "buddy canvas role!=img");
       const aria = (await page.getAttribute("#buddy-canvas", "aria-label")) || "";
       assert(aria.trim().length > 0, "buddy canvas has no aria-label");
     });
-    await check("the measured drink event raises the right arm, then it falls", async () => {
-      await page.evaluate(() => window.__nunchi.setBuddyDrinking(true));
-      await page.waitForFunction(() => window.__nunchi.buddyArmRaise() > 0.3, null, { timeout: 4000 });
-      const raised = await page.evaluate(() => window.__nunchi.buddyArmRaise());
-      assert(raised > 0.3, `arm did not raise: ${raised}`);
-      await page.evaluate(() => window.__nunchi.setBuddyDrinking(false));
-      await page.waitForFunction(() => window.__nunchi.buddyArmRaise() < 0.15, null, { timeout: 4000 });
-      const lowered = await page.evaluate(() => window.__nunchi.buddyArmRaise());
-      assert(lowered < 0.15, `arm did not lower: ${lowered}`);
+    await check("measured expression maps to the face (mouth open + smile show in aria)", async () => {
+      await page.evaluate(() => window.__nunchi.setBuddyPose({
+        yaw_deg: 0, pitch_deg: 0, roll_deg: 0, depth: 1, conf: 0.96,
+        expr: { eye_l: 1, eye_r: 1, mouth_open: 0.9, smile: 0.7, brow_raise: 0.2 },
+      }));
+      // the shown expression lerps toward the measured target
+      await page.waitForFunction(() => {
+        const e = window.__nunchi.buddyExpr();
+        return e && e.mouth_open > 0.3 && e.smile > 0.2;
+      }, null, { timeout: 4000 });
+      const e = await page.evaluate(() => window.__nunchi.buddyExpr());
+      assert(e.mouth_open > 0.3 && e.mouth_open <= 1, `mouth_open not mapped: ${e.mouth_open}`);
+      assert(e.smile > 0.2 && e.smile <= 1, `smile not mapped: ${e.smile}`);
+      await page.waitForFunction(() => {
+        const a = document.getElementById("buddy-canvas")?.getAttribute("aria-label") || "";
+        return /mouth|입|smil|미소/i.test(a);
+      }, null, { timeout: 4000 });
+      const aria = await page.getAttribute("#buddy-canvas", "aria-label");
+      assert(/mouth|입|smil|미소/i.test(aria), `aria does not name the expression: ${aria}`);
     });
-    await check("forward-head pose leans the estimated torso; aria names it an estimate", async () => {
+    await check("face DRAWING scales with the measured values (smile curve, open mouth, eyes, brows)", async () => {
+      // Prove the picture actually changes in proportion — not just that the channel number moved.
+      // buddyFaceMetrics() reports the concrete geometry numbers applied this frame.
+      const metricsFor = async (expr) => {
+        await page.evaluate((e) => window.__nunchi.setBuddyPose({ yaw_deg: 0, pitch_deg: 0, roll_deg: 0, depth: 1, conf: 0.97, expr: e }), expr);
+        // wait for the smoothed expr to approach the target so the metrics reflect it
+        await page.waitForFunction((t) => {
+          const e = window.__nunchi.buddyExpr(); if (!e) return false;
+          return Math.abs(e.smile - t.smile) < 0.04 && Math.abs(e.mouth_open - t.mouth_open) < 0.04 &&
+                 Math.abs(e.brow_raise - t.brow_raise) < 0.04 && Math.abs(e.eye_l - t.eye_l) < 0.04;
+        }, expr, { timeout: 5000 }).catch(() => {});
+        await page.waitForTimeout(120);
+        return page.evaluate(() => window.__nunchi.buddyFaceMetrics());
+      };
+      const neutral = await metricsFor({ eye_l: 1, eye_r: 1, mouth_open: 0, smile: 0, brow_raise: 0 });
+      const bigSmile = await metricsFor({ eye_l: 1, eye_r: 1, mouth_open: 0, smile: 0.95, brow_raise: 0 });
+      const yawn = await metricsFor({ eye_l: 1, eye_r: 1, mouth_open: 0.95, smile: 0, brow_raise: 0 });
+      const browsUp = await metricsFor({ eye_l: 1, eye_r: 1, mouth_open: 0, smile: 0, brow_raise: 0.95 });
+      const closed = await metricsFor({ eye_l: 0.05, eye_r: 0.05, mouth_open: 0, smile: 0, brow_raise: 0 });
+      const wink = await metricsFor({ eye_l: 0.05, eye_r: 1, mouth_open: 0, smile: 0, brow_raise: 0 });
+      assert(neutral && bigSmile && yawn, "no face metrics");
+      if (neutral.mode === "3d") {
+        // smile bows the curve more than neutral; an open mouth shows + grows; brows rise; a
+        // closing eye lowers its lid; a wink lowers ONE lid clearly below the other.
+        assert(bigSmile.smileArcBow > neutral.smileArcBow + 0.1, `smile did not bow more: ${neutral.smileArcBow} -> ${bigSmile.smileArcBow}`);
+        assert(!neutral.openMouthVisible && yawn.openMouthVisible, "open mouth not shown for a yawn");
+        assert(yawn.openMouthH > neutral.openMouthH + 0.3, `open mouth did not grow: ${neutral.openMouthH} -> ${yawn.openMouthH}`);
+        assert(browsUp.browY > neutral.browY + 0.03, `brows did not rise: ${neutral.browY} -> ${browsUp.browY}`);
+        assert(closed.lidL < neutral.lidL - 0.05, `closed lid did not lower: ${neutral.lidL} -> ${closed.lidL}`);
+        assert(!closed.pupilLVisible, "pupil still shown on a shut eye");
+        assert(wink.lidL < wink.lidR - 0.05, `wink did not lower one lid vs the other: L${wink.lidL} R${wink.lidR}`);
+      } else {
+        assert(bigSmile.smileBow > neutral.smileBow + 0.1, `2D smile did not bow more: ${neutral.smileBow} -> ${bigSmile.smileBow}`);
+        assert(!neutral.openMouthVisible && yawn.openMouthVisible, "2D open mouth not shown for a yawn");
+        assert(yawn.openMouthH > neutral.openMouthH + 0.1, `2D open mouth did not grow: ${neutral.openMouthH} -> ${yawn.openMouthH}`);
+        assert(browsUp.browRaise > neutral.browRaise + 0.3, "2D brows did not rise");
+        assert(closed.lidCoverL > neutral.lidCoverL + 0.3, "2D closed lid did not cover more");
+        assert(wink.lidCoverL > wink.lidCoverR + 0.3, "2D wink did not cover one eye vs the other");
+      }
+    });
+    await check("null / missing expr is safe — face holds neutral, no errors", async () => {
+      // pose with no expr at all, then an explicitly null expr: both must settle to a neutral
+      // face (eyes open, mouth closed) and never throw.
+      await page.evaluate(() => window.__nunchi.setBuddyPose({ yaw_deg: 0, pitch_deg: 0, roll_deg: 0, depth: 1, conf: 0.96 }));
+      await page.waitForFunction(() => {
+        const e = window.__nunchi.buddyExpr();
+        return e && e.mouth_open < 0.15 && e.eye_l > 0.8;
+      }, null, { timeout: 4000 });
+      await page.evaluate(() => window.__nunchi.setBuddyPose({ yaw_deg: 0, pitch_deg: 0, roll_deg: 0, depth: 1, conf: 0.96, expr: null }));
+      await page.waitForTimeout(200);
+      const e = await page.evaluate(() => window.__nunchi.buddyExpr());
+      for (const k of ["eye_l", "eye_r", "mouth_open", "smile", "brow_raise"]) {
+        assert(Number.isFinite(e[k]), `expr channel ${k} became non-finite with null expr`);
+      }
+      assert(e.mouth_open < 0.2, `mouth did not return to neutral on null expr: ${e.mouth_open}`);
+    });
+    await check("the measured drink event shows a cup/chip near the mouth, then clears", async () => {
+      await page.evaluate(() => window.__nunchi.setBuddyDrinking(true));
+      await page.waitForFunction(() => window.__nunchi.buddyDrinkingShown() === true, null, { timeout: 4000 });
+      assert((await page.evaluate(() => window.__nunchi.buddyDrinkingShown())) === true, "drink cup/chip did not show");
+      await page.evaluate(() => window.__nunchi.setBuddyDrinking(false));
+      await page.waitForFunction(() => window.__nunchi.buddyDrinkingShown() === false, null, { timeout: 4000 });
+      assert((await page.evaluate(() => window.__nunchi.buddyDrinkingShown())) === false, "drink cup/chip did not clear");
+    });
+    await check("forward-head pose leans the estimated neck; aria names it an estimate", async () => {
       await page.evaluate(() => window.__nunchi.setBuddyPose({ yaw_deg: 0, pitch_deg: 12, roll_deg: 1, depth: 1.4, conf: 0.95 }));
-      await page.waitForFunction(() => window.__nunchi.buddyTorsoLean() > 1, null, { timeout: 4000 });
-      const lean = await page.evaluate(() => window.__nunchi.buddyTorsoLean());
-      assert(lean > 1 && lean <= 18, `torso lean out of range: ${lean}`);
+      await page.waitForFunction(() => window.__nunchi.buddyNeckBend() > 0.5, null, { timeout: 4000 });
+      const bend = await page.evaluate(() => window.__nunchi.buddyNeckBend());
+      assert(bend > 0.5 && bend <= 16, `neck bend out of range: ${bend}`);
       await page.waitForFunction(() => {
         const a = document.getElementById("buddy-canvas")?.getAttribute("aria-label") || "";
         return /estimate|추정/i.test(a);
@@ -734,27 +812,26 @@ async function main() {
       assert(/estimate|추정/i.test(aria), `aria does not flag estimate: ${aria}`);
     });
     await check("low confidence holds the figure still (tracking unsure)", async () => {
-      // let the forward-head lean settle first (ramp complete) so `before` is a stable value,
-      // not a mid-animation sample that the next frame would still advance.
-      await page.waitForFunction(() => window.__nunchi.buddyTorsoLean() > 10, null, { timeout: 4000 }).catch(() => {});
+      // let the forward-head bend settle first so `before` is a stable value, not a mid-animation
+      // sample that the next frame would still advance.
       let prev = -1, stable = 0;
       await page.waitForFunction(() => true, null, { timeout: 100 });
       for (let i = 0; i < 40 && stable < 3; i++) {
-        const v = await page.evaluate(() => window.__nunchi.buddyTorsoLean());
+        const v = await page.evaluate(() => window.__nunchi.buddyNeckBend());
         if (Math.abs(v - prev) < 0.05) stable++; else stable = 0;
         prev = v;
         await page.waitForTimeout(60);
       }
-      const before = await page.evaluate(() => window.__nunchi.buddyTorsoLean());
+      const before = await page.evaluate(() => window.__nunchi.buddyNeckBend());
       await page.evaluate(() => window.__nunchi.setBuddyPose({ yaw_deg: 30, pitch_deg: 30, roll_deg: 20, depth: 1.9, conf: 0.2 }));
-      // the unsure badge flips synchronously; the rig then freezes — confirm the lean does not move.
+      // the unsure badge flips synchronously; the rig then freezes — confirm the bend does not move.
       await page.waitForFunction(() => !document.getElementById("buddy-unsure")?.hidden, null, { timeout: 4000 });
       await page.waitForTimeout(350);
-      const after = await page.evaluate(() => window.__nunchi.buddyTorsoLean());
+      const after = await page.evaluate(() => window.__nunchi.buddyNeckBend());
       assert(Math.abs(after - before) < 0.5, `figure moved on low conf: ${before} → ${after}`);
       assert(!(await page.locator("#buddy-unsure").evaluate((el) => el.hidden)), "unsure badge hidden on low conf");
     });
-    await check("ghost (good-posture outline) toggles on the new figure without errors", async () => {
+    await check("ghost (good-posture outline) toggles on the face+neck figure without errors", async () => {
       await page.check("#buddy-ghost");
       await page.waitForTimeout(120);
       assert(await page.locator("#buddy-ghost").isChecked(), "ghost not checked");
@@ -766,13 +843,13 @@ async function main() {
       await page.keyboard.press("Home");
       assert((await page.evaluate(() => document.activeElement?.id)) === "buddy-canvas", "canvas lost focus");
     });
-    await check("no uncaught page errors across the sitting-buddy flow", async () =>
+    await check("no uncaught page errors across the face+neck buddy flow", async () =>
       assert(pageErrors.length === 0, `page errors: ${pageErrors.join(" | ")}`));
     await page.close();
   }
 
-  // ---- 3c3. W14: mobile 390px shows the figure + honesty line without overflow ----
-  group("sitting buddy mobile (W14)");
+  // ---- 3c3. W20: mobile 390px shows the figure + honesty line without overflow ----
+  group("face+neck buddy mobile (W20)");
   {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 820 }, isMobile: true });
     const page = await ctx.newPage();
@@ -826,6 +903,148 @@ async function main() {
       await page.close();
       await ctx.close();
     }
+  }
+
+  // ---- 3e. W21: trial-key button (30-min, IP 3/day) ----
+  // All server calls are MOCKED via page.route — we never hit the deployed API. A mock service
+  // at https://svc.test.local answers /config.json, /healthz (key_issuing), and POST /v1/keys.
+  group("trial key button (W21)");
+  {
+    // Build a page whose service responses we control. `keyResponder` decides POST /v1/keys.
+    const makeTrialPage = async ({ keyIssuing = true, keyResponder } = {}) => {
+      const page = await desktop.newPage();
+      const pageErrors = [];
+      page.on("pageerror", (e) => pageErrors.push(String(e)));
+      await page.route("**/config.json", (route) =>
+        route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ apiBase: "https://svc.test.local" }) }));
+      await page.route("https://svc.test.local/healthz", (route) =>
+        route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, cv_version: "5.0.0", backend: "opencv", arch: "arm64", build: "test", key_issuing: keyIssuing }) }));
+      await page.route("https://svc.test.local/v1/keys", (route) => {
+        if (route.request().method() !== "POST") return route.continue();
+        (keyResponder || (() => route.fulfill({
+          status: 200, contentType: "application/json",
+          body: JSON.stringify({ key: "deadbeef".repeat(4), expires_at: new Date(Date.now() + 1800000).toISOString(), ttl_s: 1800, remaining_today: 2 }),
+        })))(route);
+      });
+      await page.goto(`${BASE}/`, { waitUntil: "load" });
+      await page.waitForFunction(() => window.__nunchi);
+      return { page, pageErrors };
+    };
+
+    await check("key_issuing:true shows the trial-key button + IP note; false hides it", async () => {
+      const { page } = await makeTrialPage({ keyIssuing: true });
+      await page.click("#mode-live");
+      await page.waitForFunction(() => window.__nunchi.trialKeyBtnVisible() === true, null, { timeout: 4000 });
+      assert(await page.isVisible("#btn-trial-key"), "trial-key button hidden when key_issuing true");
+      assert(await page.isVisible("#trial-key-ipnote"), "IP note hidden");
+      const note = (await page.textContent("#trial-key-ipnote")) || "";
+      assert(/IP/i.test(note) && /48/.test(note), `IP note missing the 48h/encrypted wording: ${note}`);
+      await page.close();
+
+      const { page: p2 } = await makeTrialPage({ keyIssuing: false });
+      await p2.click("#mode-live");
+      await p2.waitForTimeout(600); // let the healthz probe resolve
+      assert((await p2.evaluate(() => window.__nunchi.trialKeyBtnVisible())) === false, "trial-key button shown when key_issuing false");
+      assert(!(await p2.isVisible("#btn-trial-key")), "trial-key button visible with key_issuing false");
+      await p2.close();
+    });
+
+    await check("getting a key fills the input (memory only) + starts the countdown", async () => {
+      const { page } = await makeTrialPage({ keyIssuing: true });
+      await page.click("#mode-live");
+      await page.waitForFunction(() => window.__nunchi.trialKeyBtnVisible() === true, null, { timeout: 4000 });
+      await page.click("#btn-trial-key");
+      await page.waitForFunction(() => window.__nunchi.trialKeyActive() === true, null, { timeout: 4000 });
+      assert((await page.evaluate(() => window.__nunchi.hasLiveKey())) === true, "key not held in memory after issue");
+      assert((await page.inputValue("#live-key")).length >= 32, "key input not filled");
+      const ms = await page.evaluate(() => window.__nunchi.trialKeyRemainingMs());
+      assert(ms > 25 * 60 * 1000 && ms <= 30 * 60 * 1000, `remaining time out of range: ${ms}`);
+      await page.waitForSelector("#trial-key-remaining:not([hidden])", { timeout: 4000 });
+      const rem = (await page.textContent("#trial-key-remaining")) || "";
+      assert(/\d\d:\d\d/.test(rem), `countdown not shown mm:ss: ${rem}`);
+      // the issued key must NOT leak to storage or the URL
+      const leak = await page.evaluate(() => ({
+        ls: (() => { try { return JSON.stringify(localStorage); } catch { return "{}"; } })(),
+        ss: (() => { try { return JSON.stringify(sessionStorage); } catch { return "{}"; } })(),
+        url: location.href, key: window.__nunchi ? null : null,
+      }));
+      assert(!/deadbeef/.test(leak.ls), "issued key leaked to localStorage");
+      assert(!/deadbeef/.test(leak.ss), "issued key leaked to sessionStorage");
+      assert(!/deadbeef/.test(leak.url), "issued key leaked to URL");
+      await page.close();
+    });
+
+    await check("429 ip_daily_limit → honest message + a Demo alternative", async () => {
+      const { page } = await makeTrialPage({ keyIssuing: true, keyResponder: (route) =>
+        route.fulfill({ status: 429, contentType: "application/json", body: JSON.stringify({ error: "ip_daily_limit", retry_after_s: 3600, limit: 3 }) }) });
+      await page.click("#mode-live");
+      await page.waitForFunction(() => window.__nunchi.trialKeyBtnVisible() === true, null, { timeout: 4000 });
+      await page.click("#btn-trial-key");
+      await waitScreen(page, "screen-camerror", 4000);
+      const body = (await page.textContent("#camerr-body")) || "";
+      assert(/today|오늘/i.test(body), `429 body not about today's limit: ${body}`);
+      assert(await page.isVisible("#btn-tomock"), "no Demo alternative on 429");
+      await page.close();
+    });
+
+    await check("503 capacity → honest message + a Demo alternative", async () => {
+      const { page } = await makeTrialPage({ keyIssuing: true, keyResponder: (route) =>
+        route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "capacity" }) }) });
+      await page.click("#mode-live");
+      await page.waitForFunction(() => window.__nunchi.trialKeyBtnVisible() === true, null, { timeout: 4000 });
+      await page.click("#btn-trial-key");
+      await waitScreen(page, "screen-camerror", 4000);
+      assert(await page.isVisible("#btn-tomock"), "no Demo alternative on 503");
+      await page.close();
+    });
+
+    await check("the Demo alternative on a trial-key error starts a demo session", async () => {
+      const { page } = await makeTrialPage({ keyIssuing: true, keyResponder: (route) =>
+        route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "capacity" }) }) });
+      await page.click("#mode-live");
+      await page.waitForFunction(() => window.__nunchi.trialKeyBtnVisible() === true, null, { timeout: 4000 });
+      await page.click("#btn-trial-key");
+      await waitScreen(page, "screen-camerror", 4000);
+      await page.click("#btn-tomock"); // "Use Demo mode"
+      await waitScreen(page, "screen-run", 12000);
+      assert((await screen(page)) === "screen-run", "demo did not start from the trial-key error");
+      await page.close();
+    });
+
+    await check("expiry (fast-forwarded) ends the session and shows the key-expired screen", async () => {
+      const { page, pageErrors } = await makeTrialPage({ keyIssuing: true });
+      await page.click("#mode-live");
+      await page.waitForFunction(() => window.__nunchi.trialKeyBtnVisible() === true, null, { timeout: 4000 });
+      await page.click("#btn-trial-key");
+      await page.waitForFunction(() => window.__nunchi.trialKeyActive() === true, null, { timeout: 4000 });
+      // fast-forward expiry (no 30-min wait)
+      await page.evaluate(() => window.__nunchi.forceTrialKeyExpire());
+      await waitScreen(page, "screen-camerror", 4000);
+      const title = (await page.textContent("#camerr-title")) || "";
+      assert(/expired|만료/i.test(title), `expiry screen title wrong: ${title}`);
+      assert((await page.evaluate(() => window.__nunchi.trialKeyActive())) === false, "trial key still active after expiry");
+      assert((await page.evaluate(() => window.__nunchi.hasLiveKey())) === false, "expired key not dropped from memory");
+      assert(!/deadbeef/.test(await page.inputValue("#live-key")), "expired key still in the input");
+      assert(await page.isVisible("#btn-tomock"), "no Demo alternative on expiry");
+      assert(pageErrors.length === 0, `page errors on expiry: ${pageErrors.join(" | ")}`);
+      await page.close();
+    });
+
+    await check("mobile 390px: trial-key button + IP note fit with no horizontal scroll", async () => {
+      const page = await mobile.newPage();
+      await page.route("**/config.json", (route) =>
+        route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ apiBase: "https://svc.test.local" }) }));
+      await page.route("https://svc.test.local/healthz", (route) =>
+        route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, key_issuing: true, arch: "arm64", backend: "opencv", cv_version: "5.0.0" }) }));
+      await page.goto(`${BASE}/`, { waitUntil: "load" });
+      await page.waitForFunction(() => window.__nunchi);
+      await page.click("#mode-live");
+      await page.waitForFunction(() => window.__nunchi.trialKeyBtnVisible() === true, null, { timeout: 4000 });
+      assert(await page.isVisible("#btn-trial-key"), "trial-key button hidden on mobile");
+      assert(await page.isVisible("#trial-key-ipnote"), "IP note hidden on mobile");
+      await assertNoHScroll(page, "mobile trial key");
+      await page.close();
+    });
   }
 
   // ---- 4. error states (>= 3 kinds) ----

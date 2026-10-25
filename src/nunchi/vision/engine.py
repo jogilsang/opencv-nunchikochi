@@ -28,6 +28,7 @@ from nunchi.contracts import SCHEMA_VERSION, FrameResult, Metrics, Quality
 from nunchi.vision.calibration import Baseline, CalibrationResult, Calibrator
 from nunchi.vision.enhance import enhance_bgr
 from nunchi.vision.events import BehaviorStateMachine
+from nunchi.vision.expression import raw_expression
 from nunchi.vision.filters import FilterConfig, StabilizedMetric
 from nunchi.vision.hands import PalmDetector, hand_mouth_signal
 from nunchi.vision.headpose import head_pose_from_landmarks
@@ -65,6 +66,15 @@ def pose_disabled() -> bool:
     return os.environ.get("NUNCHI_DISABLE_POSE", "").strip() in ("1", "true", "True", "yes")
 
 
+def expr_disabled() -> bool:
+    """Whether expression numbers (overlay.expr, V14) are turned off via the env.
+
+    ``NUNCHI_DISABLE_EXPR=1`` drops the V14 face-expression block so operators can
+    A/B its cost or shed it under load WITHOUT a redeploy. Default = expr ON.
+    """
+    return os.environ.get("NUNCHI_DISABLE_EXPR", "").strip() in ("1", "true", "True", "yes")
+
+
 @dataclass
 class SessionState:
     """Per-session vision state (no frames; scalars/filters/baseline only).
@@ -85,6 +95,11 @@ class SessionState:
     _pose_yaw: StabilizedMetric | None = None   # V10: head-pose overlay smoothing
     _pose_pitch: StabilizedMetric | None = None
     _pose_roll: StabilizedMetric | None = None
+    _expr_eye_l: StabilizedMetric | None = None   # V14: expression overlay smoothing
+    _expr_eye_r: StabilizedMetric | None = None
+    _expr_mouth: StabilizedMetric | None = None
+    _expr_smile: StabilizedMetric | None = None
+    _expr_brow: StabilizedMetric | None = None
     _sm: BehaviorStateMachine | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -109,6 +124,11 @@ class SessionState:
                 "pose_yaw": self._pose_yaw.to_dict() if self._pose_yaw else None,
                 "pose_pitch": self._pose_pitch.to_dict() if self._pose_pitch else None,
                 "pose_roll": self._pose_roll.to_dict() if self._pose_roll else None,
+                # V14: expression (overlay.expr) filters are display-only and are
+                # DELIBERATELY NOT serialised — expr numbers must never enter the
+                # persisted state blob (DynamoDB). After a Lambda swap the expr EMA
+                # simply re-warms over a frame or two (cosmetic). See
+                # tests/vision/test_expression_privacy.py.
             },
             "state_machine": self._sm.to_dict() if self._sm else None,
             "extra": self.extra,
@@ -142,6 +162,15 @@ class SessionState:
         st._pose_yaw = StabilizedMetric.from_dict(f["pose_yaw"]) if f.get("pose_yaw") else None
         st._pose_pitch = StabilizedMetric.from_dict(f["pose_pitch"]) if f.get("pose_pitch") else None
         st._pose_roll = StabilizedMetric.from_dict(f["pose_roll"]) if f.get("pose_roll") else None
+        # V14: expr filters are not persisted (privacy). Re-create fresh ones on
+        # restore so smoothing resumes (cosmetic re-warm, no expr value recovered
+        # from the blob).
+        _expr_cfg = FilterConfig(ema_alpha=0.5, median_window=3)
+        st._expr_eye_l = StabilizedMetric.from_config(_expr_cfg)
+        st._expr_eye_r = StabilizedMetric.from_config(_expr_cfg)
+        st._expr_mouth = StabilizedMetric.from_config(_expr_cfg)
+        st._expr_smile = StabilizedMetric.from_config(_expr_cfg)
+        st._expr_brow = StabilizedMetric.from_config(_expr_cfg)
         sm = d.get("state_machine")
         st._sm = BehaviorStateMachine.from_dict(sm) if sm else None
         st.extra = d.get("extra", {})
@@ -189,6 +218,14 @@ class VisionEngine:
         st._pose_yaw = StabilizedMetric.from_config(self._filter_cfg)
         st._pose_pitch = StabilizedMetric.from_config(self._filter_cfg)
         st._pose_roll = StabilizedMetric.from_config(self._filter_cfg)
+        # V14 expression smoothing: responsive but jitter-damped. alpha 0.5 +
+        # median 3 keeps lag well under 200ms at the ~2fps frame cadence.
+        _expr_cfg = FilterConfig(ema_alpha=0.5, median_window=3)
+        st._expr_eye_l = StabilizedMetric.from_config(_expr_cfg)
+        st._expr_eye_r = StabilizedMetric.from_config(_expr_cfg)
+        st._expr_mouth = StabilizedMetric.from_config(_expr_cfg)
+        st._expr_smile = StabilizedMetric.from_config(_expr_cfg)
+        st._expr_brow = StabilizedMetric.from_config(_expr_cfg)
         st._sm = BehaviorStateMachine()
         return st
 
@@ -332,6 +369,54 @@ class VisionEngine:
             "conf": float(raw["conf"]),
         }
 
+    def _expression(self, state: SessionState, lm: Landmarks, *, mutate: bool,
+                    conf: float | None) -> dict[str, Any] | None:
+        """V14 face-expression numbers for ``overlay.expr`` (display-only).
+
+        Returns ``{eye_l,eye_r,mouth_open,smile,brow_raise}`` (each 0..1 or None),
+        normalised to the calibration baseline and EMA-smoothed on the real path.
+        NOT emotion — only measured face movement. When confidence is low
+        (``conf`` below a floor, e.g. a bad head-pose solve) all fields are None so
+        the web doll freezes rather than twitching on noise. Returns None if there
+        are no landmarks. On variants (mutate=False) it computes but does not write
+        the session filters.
+        """
+        if lm.pts is None:
+            return None
+        b = state.baseline
+        # References: prefer calibrated per-user values; fall back to sane spans
+        # so expression still works before calibration (eyes/mouth only).
+        ear_open = b.ear_open if b else 0.25
+        ear_low = b.ear_p10 if b else 0.10
+        mar_rest = b.mar_rest if b else 0.0
+        smile_rest = b.smile_rest if b else None
+        brow_rest = b.brow_rest if b else None
+        raw = raw_expression(
+            lm.pts, ear_open=ear_open, ear_low=ear_low, mar_rest=mar_rest,
+            smile_rest=smile_rest, brow_rest=brow_rest,
+        )
+        # Confidence gate: if the pose solve conf is known and poor, don't report
+        # noisy expression (null = web freezes the face). Threshold mirrors the
+        # posture doll's "estimation unstable" behaviour.
+        if conf is not None and conf < 0.3:
+            return {k: None for k in raw}
+
+        filt = {
+            "eye_l": state._expr_eye_l, "eye_r": state._expr_eye_r,
+            "mouth_open": state._expr_mouth, "smile": state._expr_smile,
+            "brow_raise": state._expr_brow,
+        }
+        out: dict[str, Any] = {}
+        for key, val in raw.items():
+            if val is None:
+                out[key] = None
+                continue
+            f = filt.get(key)
+            if mutate and f is not None:
+                val = f.update(float(val)).smoothed
+            out[key] = round(float(val), 3)
+        return out
+
     def _analyze(self, state: SessionState, frame_bgr: np.ndarray, t: float,
                  *, mutate: bool, strict: bool = False) -> FrameResult:
         t0 = time.perf_counter()
@@ -393,6 +478,15 @@ class VisionEngine:
                 pose = self._head_pose(state, lm, W, H, mutate=mutate)
                 if pose is not None:
                     overlay["pose"] = pose
+            # V14 face-expression numbers for the web "face doll" (expr follows the
+            # user's eyes/mouth/brows). Numbers only, normalised to the baseline,
+            # never pixels. Gated by the pose confidence when available so noise
+            # doesn't jitter the doll. NUNCHI_DISABLE_EXPR=1 sheds it live.
+            if overlay is not None and not expr_disabled():
+                pose_conf = overlay.get("pose", {}).get("conf") if isinstance(overlay.get("pose"), dict) else None
+                expr = self._expression(state, lm, mutate=mutate, conf=pose_conf)
+                if expr is not None:
+                    overlay["expr"] = expr
 
         # V3 behaviour state machine: only on the real analyze path (not variants).
         # Blinks/yawns read the RAW fast EAR/MAR so a brief closure isn't smoothed

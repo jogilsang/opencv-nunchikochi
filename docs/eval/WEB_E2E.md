@@ -31,16 +31,22 @@ install chromium and re-run.
 
 ## 1. Browser e2e (Playwright, chromium)
 
-Command: `npm run e2e` → `web/e2e/run.mjs`. Last run: **87 / 87 passed, 0 failed**
-(ran 3× consecutively, 0 failures). Count grew 60 → 76 (W16) → 83 (W17) → 87 (W19):
-W16 added quiet mode + the posture-record timeline + the earlier-session comparison; W17
-added the real server-field mapping (`report.trend`, `history`) + the anonymous `X-Anon-Id`
-continuity checks; W19 added the short-session posture-record cases (count shown even when the
-hourly rate is withheld).
+Command: `npm run e2e` → `web/e2e/run.mjs`. Last run: **97 / 97 passed, 0 failed**
+(ran 3× consecutively, 0 failures). Count grew 60 → 76 (W16) → 83 (W17) → 87 (W19) → 89 (W20)
+→ 90 (W22) → 97 (W21): W16 added quiet mode + the posture-record timeline + the earlier-session
+comparison; W17 added the real server-field mapping (`report.trend`, `history`) + the anonymous
+`X-Anon-Id` continuity checks; W19 added the short-session posture-record cases; W20 reworked
+the buddy to a **face + neck** figure with expression-mapping + null-safe-expr checks; W22
+redrew the face so expressions **read**; W21 added the **trial-key button** group (7 checks:
+button shown/hidden by `key_issuing`, issue fills input + countdown, 429 / 503 / expiry, Demo
+alternative, mobile) — all against **mocked** `POST /v1/keys` (the deployed API is never called
+in tests).
 
-Unit tests: `npm run test:unit` → `node --test buddy-kinematics.test.mjs` — **6 / 6 passed**
-(the pure posture→rig mapping: neutral base, 1.5× exaggerate + clamp, monotonic torso lean +
-cap, low-confidence hold, drink→right arm, NaN/undefined input).
+Unit tests: `npm run test:unit` → `node --test buddy-kinematics.test.mjs` — **7 / 7 passed**
+(the pure posture→rig mapping: neutral base, 1.5× exaggerate + clamp, monotonic neck
+forward-offset + bend + cap, measured-expression pass-through + per-channel null safety,
+low-confidence hold that settles the face to neutral, `normalizeExpr` garbage safety, and
+NaN/undefined input).
 
 | Group | Check | Result |
 |---|---|---|
@@ -97,15 +103,25 @@ cap, low-confidence hold, drink→right arm, NaN/undefined input).
 | short session (W19) | short session + earlier records → "too short to compare" + earlier bars only (today not fabricated) | ✅ |
 | short session (W19) | no uncaught page errors | ✅ |
 | posture buddy (W10) | 3D/2D init, pose track, exaggeration 1.5×, rewind scrub | ✅ (10 checks) |
-| sitting buddy (W14) | parts match the active render mode (3D figure or 2D fallback) + triangle budget ≤ 4000 when 3D | ✅ |
-| sitting buddy (W14) | honesty line shown: head+hand measured, neck+torso estimated, no legs | ✅ |
-| sitting buddy (W14) | accessibility: canvas role=img with a live aria-label (either mode) | ✅ |
-| sitting buddy (W14) | measured drink event raises the right arm, then it falls | ✅ |
-| sitting buddy (W14) | forward-head leans the estimated torso; aria names it an estimate | ✅ |
-| sitting buddy (W14) | low confidence holds the figure still ("tracking unsure") | ✅ |
-| sitting buddy (W14) | good-posture ghost toggles; keyboard rotate; no console errors | ✅ |
-| sitting buddy (W14) | mobile 390px: figure + honesty line visible, no h-scroll | ✅ |
+| face+neck buddy (W20) | parts are face + neck only (head/neck/face) — body/arms/desk removed; triangle budget ≤ 4000 when 3D | ✅ |
+| face+neck buddy (W20) | honesty line shown: head+expression measured, neck estimated, no body | ✅ |
+| face+neck buddy (W20) | accessibility: canvas role=img with a live aria-label (either mode) | ✅ |
+| face+neck buddy (W20) | measured expression maps to the face (mouth open + smile show in aria) | ✅ |
+| face+neck buddy (W22) | face DRAWING scales with the values: smile curve bows, round open mouth grows, eye lids lower (wink = one lid), brows rise | ✅ |
+| face+neck buddy (W20) | null / missing expr is safe — face holds neutral, no errors | ✅ |
+| face+neck buddy (W20) | measured drink event shows a cup/chip near the mouth (no arm), then clears | ✅ |
+| face+neck buddy (W20) | forward-head leans the estimated neck; aria names it an estimate | ✅ |
+| face+neck buddy (W20) | low confidence holds the figure still ("tracking unsure") | ✅ |
+| face+neck buddy (W20) | good-posture ghost toggles; keyboard rotate; no console errors | ✅ |
+| face+neck buddy (W20) | mobile 390px: figure + honesty line visible, no h-scroll | ✅ |
 | demo strip (W11) | full-width bottom strip, no overlap, no clip @390/360px | ✅ (6 checks) |
+| trial key (W21) | `key_issuing:true` shows the "Get a trial key (30 min)" button + IP note; `false` hides it | ✅ |
+| trial key (W21) | issuing fills the (memory-only) key, starts the mm:ss countdown; key never in storage/URL | ✅ |
+| trial key (W21) | 429 `ip_daily_limit` → "no trial keys left today" + Demo alternative | ✅ |
+| trial key (W21) | 503 `capacity` → "trial keys are busy" + Demo alternative | ✅ |
+| trial key (W21) | the Demo alternative on a trial-key error starts a demo session | ✅ |
+| trial key (W21) | expiry (fast-forwarded) ends the session and shows the key-expired screen; key dropped from memory | ✅ |
+| trial key (W21) | mobile 390px: button + IP note fit, no horizontal scroll | ✅ |
 | error states | `denied` (camera refused) → recoverable screen + retry | ✅ |
 | error states | `server` (server error) → recoverable screen + retry | ✅ |
 | error states | `offline` (network drop) → recoverable screen + retry | ✅ |
@@ -330,6 +346,129 @@ posture-record card only said *"session too short"* and looked empty. W19 keeps 
 - Demo data unchanged. EN/KO copy in `i18n.js`. Covered by the "short session posture record
   (W19)" e2e group (§1, 4 checks) and screenshots `docs/screenshots/w19-{short-count,no-events,
   compare-tooshort,short-count-mobile}.png`; axe stays 0/0 and 390px has no horizontal scroll.
+
+## 3h. W20 buddy simplified to a face + neck (expression-aware)
+
+Users said the figure was more than they needed: *"just the face and neck is enough — my
+expression, my neck angle."* So the posture buddy was cut down from the W14 seated upper-body
+figure to **a head (with a live face) + a neck + a faint, level shoulder-line hint**. Removed:
+the chest/belly, both arms, the hands, the desk/keyboard/chair, and the water-drinking arm lift.
+
+- **Simpler code + e2e.** `buddy-kinematics.js` no longer emits `torsoLean` / `rightArmRaise` /
+  `shoulderShrug` — only `headRot`, `headOffset`, `neckBend`, and the new `expr`. `buddy.js`
+  builds only a neck pivot + a head; `parts()` returns `["head","neck","face","shoulderHint"]`
+  (3D) or `["head2d"]` (fallback). The e2e group is now "face+neck buddy (W20)" and asserts the
+  removed parts are **absent**; the W14 drink-arm and torso-lean checks were deleted. Triangles
+  dropped to ≈1.5k (≤4k budget).
+- **Expression (measured, not emotion).** The face reads `overlay.expr`
+  (`{eye_l, eye_r, mouth_open, smile, brow_raise}`, each 0..1): eyes close by lowering an upper
+  lid, brows rise, the mouth scales open and widens for a smile. Movement is gently exaggerated
+  (×1.25, within the shown ~1.5× head note) and clamped 0..1. **Null-safe:** a missing/null
+  channel falls back to the neutral value for that channel; low confidence settles the whole
+  face to neutral (we never freeze or invent an expression). V14 (the vision side that emits
+  `expr`) is not merged yet, so the live demo is driven by fixture `expr` values of this exact
+  shape; when V14 lands the same code consumes the real values. Unit tests cover the pass-through,
+  per-channel null safety, and `normalizeExpr` garbage safety.
+- **Water drinking without an arm.** A measured `drink` event now just shows a small cup icon
+  near the mouth (3D) / a cup chip (2D) + the "taking a sip" aria for the measured window — no
+  arm lift. It reacts only to the measured event.
+- **Honest disclosure rewritten (EN/KO).** The panel line is now: *"Head and expression are
+  measured (facial movement, not an emotion guess); the neck is estimated from head posture. We
+  don't draw a body."* The aria state appends *"— neck is estimated"* when the head leans
+  forward, and names clear facial movements (mouth open / smiling / eyes closed) so a
+  screen-reader user hears them too. `buddyPrivacy` was updated to match.
+- **Carried over unchanged:** the 1.5× head exaggeration note, the forward-head neck estimate +
+  colour shift, the good-posture ghost (sky-blue outline), 3-axis rotation (front/side/top), the
+  session rewind, the low-confidence hold, the 2D fallback (now an expressive face icon), the
+  30fps cap, and breathing-off under `prefers-reduced-motion`.
+- Covered by the "face+neck buddy (W20)" e2e group (§1, 11 checks) + the mobile group, the unit
+  tests, and screenshots `docs/screenshots/w20-buddy-{front-neutral,smile,mouth-open,forward,
+  side,drink,ghost,mobile}.png` (eyeballed: front neutral, smile, mouth open, head forward with
+  the estimated neck, side view, the drink cup, ghost overlap, mobile 390px). axe stays 0/0 and
+  390px has no horizontal scroll.
+
+**Owned-by-other-tabs copy still mentioning the old body (recorded, NOT changed here):** the
+W14 narrative in §3c above (kept as history); the W14 flaky note §3c-flaky; `README.md` and
+`docs/video/*` buddy descriptions, if any, that call it a "seated upper-body figure" — these are
+outside the web tab's ownership (`web/`, `docs/eval/WEB_E2E.md`) and were left as-is. The stale
+`docs/screenshots/w14-buddy-*.png` images (seated figure) remain on disk; the W20 captures are
+the current ones.
+
+## 3i. W22 face redrawn so expressions actually read
+
+W20's face mapped the expression values correctly, but to a human eye it didn't read as an
+expression: the mouth was a scaled **rectangle**, and the eyes were tiny dark holes so open vs
+closed barely differed. W22 redraws the face (3D + the 2D fallback) so the expression is
+unmistakable, with no new dependency (vendored three.js unchanged):
+
+- **Mouth (no rectangle).** A curved smile line (a thin half-torus, bowed upward — 3D; a
+  quadratic curve — 2D) whose width + bow grow with `smile`, blended with a round dark open
+  mouth (a flattened sphere — 3D; a filled ellipse — 2D) that grows with `mouth_open`. The two
+  mix naturally (an open smile shows both; the line fades as the mouth opens).
+- **Eyes.** White sclera + a dark pupil, bigger than before; a skin upper-lid slides down to
+  close the eye, so open/closed reads as a lid coming down and a wink (one eye) is obvious. The
+  pupil hides on a shut eye. Sizes are gently exaggerated (within the shown ~1.5× note).
+- **Brows.** Rise with `brow_raise` and arch **outward-up** (a friendly, attentive lift — the
+  earlier inward slant read as a frown), kept clear of the eyes.
+- **Overall.** A smooth round head, soft shading, the neck continuing below; a simple, friendly
+  character (no uncanny realism). The posture colour meaning is unchanged (green good → amber
+  warn). Triangle budget ≈ 2.7k (≤ 4k). null / low-confidence still settle the face to neutral.
+- **Status text clipping.** The forward-head status (up to ~4 lines) was clipped at the panel
+  bottom on W20; `.buddy-state` now has a larger auto min-height + margin (never truncated), and
+  the panel height stays automatic, verified at desktop / 390px / 360px.
+- **New proportionality check.** Beyond "the channel changed", the e2e now drives neutral / big
+  smile / yawn / brows-up / eyes-closed / wink and reads concrete geometry numbers
+  (`window.__nunchi.buddyFaceMetrics()`) to assert the drawing scales in proportion: the smile
+  curve bows more, the round open mouth appears and grows, a closing eye lowers its lid (and a
+  wink lowers only one), and the brows rise. Works in both 3D and the 2D fallback.
+- Covered by the "face+neck buddy (W20)" e2e group (now 12 checks) + the unit tests, and
+  screenshots `docs/screenshots/w22-buddy-{neutral,smile,mouth-open,eyes-closed,wink,brows-up,
+  forward,side,mobile}.png` (eyeballed: each reads as the intended expression; the forward and
+  mobile shots show the full, un-clipped status text). axe stays 0/0 and 390px has no
+  horizontal scroll. The expression-value flow, honesty line, drink cup/chip, neck estimate,
+  ghost, rotation, and low-confidence hold from W20 are unchanged.
+
+**Owned-by-other-tabs copy (recorded, NOT changed here):** same as §3h — the W14 narratives,
+`README.md` / `docs/video/*` buddy descriptions outside the web tab's ownership are left as-is;
+the stale `w14-buddy-*.png` and `w20-buddy-*.png` images remain on disk (W22 captures are the
+current ones).
+
+## 3j. W21 one-button 30-minute trial key (live mode)
+
+Live mode no longer needs a key pasted from the submission: when the server issues keys, a
+**"Get a trial key (30 min)"** button sits next to the access-key field and fetches a short-lived
+key with one press (CONTRACTS C17: `POST /v1/keys`, no key/body; global cap 6/day, per-IP 3/day,
+30-min TTL).
+
+- **Shown only when the server issues keys.** `checkService()` reads `key_issuing` from
+  `/healthz`; the button + IP note are shown when `true` and hidden when `false` (local service),
+  leaving the plain access-key input as the only path. Covered both ways in e2e.
+- **Issue → fill → countdown.** On success the key goes into the memory-only `liveKey` (fills the
+  password input, never persisted), the expiry (`expires_at` / `ttl_s`) is stored, and a
+  `mm:ss` countdown shows in an `aria-live="polite"` line; a one-shot soft notice fires at ~5 min
+  left. The IP note under the button reads (EN/KO): *"Your IP is used only to check the
+  3-per-day limit, stored as an encrypted value for 48 hours."*
+- **Key never leaks.** The issued key is asserted absent from `localStorage`,
+  `sessionStorage`, and the URL (extends the W6 "access key never lands in storage or URL"
+  guarantee to the issued-key flow). The key value is never exposed by a test hook either.
+- **Errors, each with a Demo alternative.** 429 `ip_daily_limit` → *"No trial keys left today …
+  try again after midnight UTC, or Demo mode works with no key"*; 503 `capacity` → *"Trial keys
+  are busy … Demo mode works with no key"*; a network / generic failure → a retry + Demo screen.
+  Each error screen offers a **"Use Demo mode"** button that starts a demo session. The precise
+  cause comes from the server's structured `error` body (parsed without keeping any secret).
+- **Expiry.** When the client-side countdown hits zero — or the server returns 401 `key_expired`
+  on a frame — the running session is ended **normally** (so the report reflects what was
+  captured) and the **"Your trial key expired — get a new key"** screen is shown; the dead key is
+  dropped from memory + the input. A 401 `key_invalid` is distinguished ("That key isn't valid").
+- **First screen + privacy copy** mention the one-button 30-minute trial key (EN/KO:
+  `modeLiveDesc`, `privacySentBody`).
+- **Testing is fully mocked** — Playwright `page.route` answers `/config.json`, `/healthz`
+  (`key_issuing`), and `POST /v1/keys` (success / 429 / 503); the deployed API is **never** called
+  and no real key is requested. Expiry is exercised by fast-forwarding the client clock via a test
+  hook (no 30-minute wait). Covered by the "trial key button (W21)" group (§1, 7 checks).
+  Screenshots `docs/screenshots/w21-{button,countdown,429,expired,mobile}.png` (eyeballed: the
+  button + IP note, the running `mm:ss` countdown with the key masked, the 429 and expiry screens
+  with their Demo alternatives, and the 390px layout). axe stays 0/0 and 390px has no h-scroll.
 
 ## 4. W6 live mode (Demo / Live, access key, service status)
 

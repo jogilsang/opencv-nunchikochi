@@ -50,6 +50,13 @@
             <input type="password" id="live-key" autocomplete="off" autocapitalize="off"
                    autocorrect="off" spellcheck="false" name="nunchi-access-key" />
           </label>
+          <!-- W21: one-button 30-minute trial key. Shown only when /healthz key_issuing is true. -->
+          <div class="trial-key" id="trial-key-wrap" hidden>
+            <button type="button" class="btn secondary trial-key-btn" id="btn-trial-key"
+                    data-i18n="trialKeyGet"></button>
+            <p class="field-hint trial-key-ipnote" id="trial-key-ipnote" data-i18n="trialKeyIpNote"></p>
+            <p class="trial-key-remaining" id="trial-key-remaining" role="status" aria-live="polite" hidden></p>
+          </div>
           <p class="field-hint" data-i18n="liveKeyHint"></p>
           <p class="live-status" id="live-status" role="status" aria-live="polite"></p>
         </div>

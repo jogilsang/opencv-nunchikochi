@@ -64,15 +64,16 @@ light; capture from the live demo for the final edit.)
 
 ## Live-mode assets (`docs/screenshots/live-*.png`) — W6
 
-Judges can also use **Live (your camera)** mode. These three shots were captured against a
+Judges can also use **Live (your camera)** mode. These shots were captured against a
 real **local** service (started like `scripts/run_local.sh`) with a **Playwright fake camera**
-— still no real face, no AWS, no account IDs or keys on screen. The access key field is a
-password input and the key is held in memory only (never saved to the device, URL, or logs).
+— still no real face, no AWS, no account IDs or keys on screen. Live mode needs **no shared
+key**: the page issues a 30-minute key with the **"Get a trial key (30 min)"** button, so
+there is no key field to blur.
 
 | file | screen | what it shows |
 |---|---|---|
-| `live-01-select-nokey.png` | Start → Live selected, no key | mode cards (Demo / Live), access-key field empty, "Enter the access key to start a live session" gate, memory-only hint |
-| `live-02-connected-ready.png` | Live, connected, ready | key filled (masked), honest status line **"Connected · Running on arm64 · opencv · OpenCV 5.0.0"** read from `/healthz`, consent checked, Start enabled |
+| `live-01-select-nokey.png` | Start → Live selected | mode cards (Demo / Live), the **"Get a trial key (30 min)"** button + its IP note, memory-only hint |
+| `live-02-connected-ready.png` | Live, connected, ready | trial key active, honest status line **"Connected · Running on arm64 · opencv · OpenCV 5.0.0"** read from `/healthz`, consent checked, Start enabled |
 | `live-03-running-fakecam.png` | Live session running | fake-camera stream in the preview, run UI (metrics "Measuring…" because the test pattern has no face), "Away" event + a real agent confirmation toast — the actual decision loop, not a replay |
 
 ```bash
@@ -85,67 +86,90 @@ The status string is only shown when `/healthz` actually returns those fields; i
 missing it is omitted (never invented). `web/config.json` is written for the capture and
 removed afterwards (it is gitignored; only `web/config.example.json` is committed).
 
+## Trial-key assets (`docs/screenshots/w21-*.png`) — W21
 
-## Posture-buddy assets (`docs/screenshots/w14-*.png`) — W14
-
-The **posture buddy / 자세 인형** is a soft pastel-clay **seated upper-body figure** (head,
-neck, level shoulders, chest/belly in a plain solid top, upper arms, forearms, hands — no
-bones, no skeleton, gender/ethnicity-neutral). **Legs are not drawn** (hidden under a simple
-desk + keyboard; an optional chair-back silhouette sits behind). Honesty is on screen: the
-**head follows the measured angles** (`FrameResult.overlay.pose`: yaw/pitch/roll/depth/conf,
-numbers only) and the **drink event** raises the right arm; the **neck, torso and arms are a
-labelled model estimate** (`web/buddy-kinematics.js`) — we do not measure shoulders/torso/legs.
-A panel line states it: "Head and hand are measured; neck and torso are a model estimate. Legs
-are not drawn." While vision hasn't shipped real pose it plays a synthetic fixture
-(`web/assets/pose-fixture.json`, numbers only, with a drink span) — DEMO playback, never a real
-measurement. Rendered with vendored three.js (`web/vendor/`, MIT, pinned r158, no CDN); low-poly
-(~3.2k triangles, ≤ 4k budget); drag/arrow rotation is hand-rolled; movement is shown ~1.5×
-with an on-screen label; 2D angle-icon fallback if WebGL is unavailable (same honesty line).
+Live mode is unlocked from the page itself: one click on **"Get a trial key (30 min)"**
+issues a 30-minute key (same IP 3×/day, 6/day across the whole service). No key is passed to
+judges, and nothing needs to be hidden on screen. The per-IP limit uses only a **keyed hash**
+of the client IP kept for 48 h (the raw IP is never stored, and it is removed from access logs).
 
 | file | what it shows (video beat) |
 |---|---|
-| `w14-buddy-front-neutral.png` | front view, neutral — the seated figure at rest with forearms resting forward on the desk (hands near the keyboard), calm green, honesty line visible, state "Head level and centered" |
-| `w14-buddy-front-forward.png` | forward-head — head leans forward/chin-down (measured) while the body gives an estimated bow; colour warms to amber; state ends "— torso is estimated" |
-| `w14-buddy-drinking.png` | the **measured drink event** raises the right arm so the hand/cup reaches mouth height (apex frame, pinned via a test hook) |
-| `w14-buddy-drinking-side.png` | the same drink apex from the side — elbow down, forearm folded up to the face (anatomically natural) |
-| `w14-buddy-side.png` | side view of a head tilt — the seated profile (desk/keyboard visible); forward-head creep reads clearly |
-| `w14-buddy-top.png` | top view — looking down on the seated figure (chin-down + forward) |
-| `w14-buddy-ghost.png` | **faint sky-blue good-posture ghost** overlaid on a forward-leaning buddy (toggle) + legend "Faint sky-blue outline = good posture" (distinct colour family + thin outline, not a wireframe) |
-| `w14-buddy-mobile.png` | mobile 390px — the figure + honesty line render at narrow width with no horizontal scroll |
+| `w21-button.png` | Live selected, the "Get a trial key (30 min)" button + the IP note ("used only to check the 3-per-day limit, stored as an encrypted value for 48 hours") |
+| `w21-countdown.png` | a trial key active, the "Trial key: mm:ss left" status counting down |
+| `w21-expired.png` | the key expired state ("get a new key, or use Demo mode — no key needed") |
+| `w21-429.png` | the limit-reached message when keys are used up (fall back to Demo mode) |
+| `w21-mobile.png` | mobile 390px — the button + IP note render at narrow width with no horizontal scroll |
+
+```bash
+# healthz key_issuing:true drives the button; demo/mock, no real server:
+BASE=http://localhost:8099 node web/e2e/capture-w21.mjs   # → docs/screenshots/w21-*.png
+```
+
+## Posture-buddy assets (`docs/screenshots/w22-*.png`, `w20-buddy-drink.png`) — W20/W22
+
+The **posture buddy / 자세 인형** is a soft pastel-clay **face + neck** (W20; the body, arms,
+hands and desk were removed — people said "the face is the point"). What it draws: the
+**head follows the measured angles** (`FrameResult.overlay.pose`: yaw/pitch/roll/depth/conf,
+numbers only) and the **face mirrors your measured expression** (`overlay.expr`: eyes, mouth,
+smile, brows — measured face movement, **not** an emotion guess); the **neck is a labelled
+model estimate** from the head angles (`web/buddy-kinematics.js`), and **no body is drawn**.
+A measured **drink event** shows a small cup near the mouth (no arm). A panel line states it:
+"Head pose and expression are measured; the neck is an estimate. No body is drawn." While
+vision hasn't shipped real pose it plays a synthetic fixture (`web/assets/pose-fixture.json`,
+numbers only, with a drink span) — DEMO playback, never a real measurement. Rendered with
+vendored three.js (`web/vendor/`, MIT, pinned r158, no CDN); drag/arrow rotation is
+hand-rolled; movement is shown ~1.5× with an on-screen label; 2D fallback if WebGL is
+unavailable (same honesty line). W22 redrew the face so expressions read clearly.
+
+| file | what it shows (video beat) |
+|---|---|
+| `w22-buddy-neutral.png` | front view, neutral — the face + neck at rest, calm green, honesty line visible |
+| `w22-buddy-smile.png` | a measured **smile** (mouth + cheeks) following `overlay.expr.smile` |
+| `w22-buddy-mouth-open.png` | a measured **open mouth** (e.g. a yawn) following `overlay.expr.mouth_open` |
+| `w22-buddy-eyes-closed.png` | measured **eyes closed** (blink / deep blink) following `overlay.expr.eye_*` |
+| `w22-buddy-wink.png` | a measured **wink** — one eye closed (asymmetric `eye_l` / `eye_r`) |
+| `w22-buddy-brows-up.png` | measured **raised brows** following `overlay.expr.brow_raise` |
+| `w22-buddy-forward.png` | **forward-head** — head leans forward/chin-down (measured) while the neck gives an estimated bow; colour warms to amber |
+| `w22-buddy-side.png` | side view of a head tilt — forward-head creep reads clearly |
+| `w20-buddy-drink.png` | the **measured drink event** — a small cup appears near the mouth (no arm) |
+| `w22-buddy-mobile.png` | mobile 390px — the figure + honesty line render at narrow width with no horizontal scroll |
 
 ```bash
 # demo mode only (no camera, no server), software WebGL for headless capture:
-BASE=http://localhost:8099 node web/e2e/capture-w14.mjs   # → docs/screenshots/w14-buddy-*.png
+BASE=http://localhost:8099 node web/e2e/capture-w22.mjs   # → docs/screenshots/w22-buddy-*.png
+BASE=http://localhost:8099 node web/e2e/capture-w20.mjs   # → docs/screenshots/w20-buddy-*.png
 ```
 
 ### Screen recording for the buddy scene (SCRIPT §6 / SHOTLIST scene 6)
 
 - **Demo-mode buddy playback (auto):** `web/tools/record_demo.mjs` (demo mode `?demo=1&fast=1`,
-  **no fake camera**) includes a buddy beat — it scrolls the seated figure into view and drives
-  tilt → forward-head (estimated bow) → side view + sky-blue ghost → rewind scrub, so the buddy
-  motion is captured without any camera. The fixture also carries a drink span that raises the
-  arm. Output webm is gitignored (`docs/video/recordings/`, never committed).
+  **no fake camera**) includes a buddy beat — it scrolls the face + neck into view and drives
+  expressions → forward-head (estimated bow) → drink cup → side view + sky-blue ghost → rewind
+  scrub, so the buddy motion is captured without any camera. Output webm is gitignored
+  (`docs/video/recordings/`, never committed).
   ```bash
   python3 -m http.server 8099 --directory web
   node web/tools/record_demo.mjs --base http://localhost:8099 --out docs/video/recordings
   ```
 - **Live buddy short clip ([USER] — user's job):** a short clip of the buddy following a real
-  webcam (head tilt → lean forward → sit up → rewind) is recorded by the user per
+  webcam (expressions → lean forward → sit up → rewind) is recorded by the user per
   `USER_RECORDING_GUIDE.md` step 3.5. Optional; the demo recording already covers the beat.
 
 ### Suggested video beat (SCRIPT §6, ~40 s, after the agent panel)
 
-> "You can also see yourself as a calm, seated posture buddy. The honest part is on screen: the
-> head and the drink are measured; the neck and torso are a model estimate, and the legs aren't
-> drawn. Lean in and the body gives an estimated bow; take a sip and the measured drink event
-> raises its arm. Rotate it, compare to the faint sky-blue good-posture ghost, and scrub the
-> timeline to see exactly when your head crept forward. Movement is exaggerated ~1.5×."
+> "You can also see yourself as a calm clay face and neck. The honest part is on screen: the
+> head pose and your facial movement are measured; the neck is a model estimate, and no body
+> is drawn. Smile, blink, raise your brows — measured face movement, not an emotion guess;
+> lean in and the neck gives an estimated bow; a measured sip shows a small cup at the mouth.
+> Rotate it, compare to the faint sky-blue good-posture ghost, and scrub the timeline to see
+> exactly when your head crept forward. Movement is exaggerated ~1.5×."
 
-### Rules honoured (W10 / W11)
+### Rules honoured (W20 / W22)
 
 - Numbers only: the buddy never touches images or raw landmark points (privacy modal states this).
-- Head only: shoulders/torso are **not** estimated (body pose deferred — `docs/eval/BODY_POSE_FEASIBILITY.md`); the narration says so.
-- Child-friendly: rounded clay figure, no bones/skeleton; calm green→amber, never red/fear colours.
+- Head + expression measured; the **neck is estimated** and **no body is drawn** (body pose deferred — `docs/eval/BODY_POSE_FEASIBILITY.md`); the narration says so, and expression is measured face movement, not emotion.
+- Child-friendly: rounded clay face, no bones/skeleton; calm green→amber, never red/fear colours.
 - Honest: the ~1.5× exaggeration is labelled on screen; low confidence holds still and says so; no accuracy claim.
 - Accessible: canvas is `role="img"` with a spoken aria-label, state is also shown as text
   (never colour-only); ghost has a text legend; EN/KO throughout; axe violations stay at 0 (hard).

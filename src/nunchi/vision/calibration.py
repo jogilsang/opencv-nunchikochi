@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from nunchi.vision import expression as X
 from nunchi.vision import metrics as M
 
 
@@ -33,13 +34,20 @@ class Baseline:
     pose_yaw0: float = 0.0
     pose_pitch0: float = 0.0
     pose_roll0: float = 0.0
+    # V14 expression references (resting neutral). overlay.expr is normalised to
+    # these so a naturally wide mouth / narrow eyes is not mislabelled. Defaulted
+    # so a pre-V14 baseline (which lacks them) deserialises; expression then falls
+    # back to mean-EAR span / absolute spans where a reference is missing.
+    smile_rest: float | None = None   # resting lip-corner spread/raise proxy
+    brow_rest: float | None = None    # resting brow-eye distance proxy (None if unreliable)
 
     def to_dict(self) -> dict:
         return {"ear_open": self.ear_open, "ear_p10": self.ear_p10, "mar_rest": self.mar_rest,
                 "face_px": self.face_px, "pitch_frontal": self.pitch_frontal,
                 "roll_zero": self.roll_zero, "samples": self.samples,
                 "pose_yaw0": self.pose_yaw0, "pose_pitch0": self.pose_pitch0,
-                "pose_roll0": self.pose_roll0}
+                "pose_roll0": self.pose_roll0,
+                "smile_rest": self.smile_rest, "brow_rest": self.brow_rest}
 
     @classmethod
     def from_dict(cls, d: dict) -> Baseline:
@@ -47,7 +55,8 @@ class Baseline:
                    face_px=d["face_px"], pitch_frontal=d["pitch_frontal"],
                    roll_zero=d["roll_zero"], samples=d.get("samples", 0),
                    pose_yaw0=d.get("pose_yaw0", 0.0), pose_pitch0=d.get("pose_pitch0", 0.0),
-                   pose_roll0=d.get("pose_roll0", 0.0))
+                   pose_roll0=d.get("pose_roll0", 0.0),
+                   smile_rest=d.get("smile_rest"), brow_rest=d.get("brow_rest"))
 
 
 @dataclass
@@ -88,6 +97,8 @@ class Calibrator:
     _pose_yaw: list[float] = field(default_factory=list)
     _pose_pitch: list[float] = field(default_factory=list)
     _pose_roll: list[float] = field(default_factory=list)
+    _smile: list[float] = field(default_factory=list)   # V14 resting smile proxy
+    _brow: list[float] = field(default_factory=list)     # V14 resting brow-eye dist
     _t_start: float | None = None
     _t_last: float | None = None
 
@@ -95,6 +106,7 @@ class Calibrator:
         self._ears.clear(); self._mars.clear(); self._face_px.clear()
         self._pitch.clear(); self._roll.clear()
         self._pose_yaw.clear(); self._pose_pitch.clear(); self._pose_roll.clear()
+        self._smile.clear(); self._brow.clear()
         self._t_start = None; self._t_last = None
 
     def feed(self, pts: np.ndarray | None, quality_ok: bool, quality_reason: str, t: float,
@@ -121,6 +133,14 @@ class Calibrator:
         self._face_px.append(M.face_height(pts))
         self._pitch.append(M.pitch_proxy(pts))
         self._roll.append(roll)
+        # V14: resting expression references (None samples are skipped so a bad
+        # frame doesn't poison the median).
+        s_rest = X.smile_proxy_raw(pts)
+        if s_rest is not None:
+            self._smile.append(s_rest)
+        b_rest = X.brow_eye_distance_raw(pts)
+        if b_rest is not None:
+            self._brow.append(b_rest)
         if pose is not None:
             self._pose_yaw.append(float(pose.get("yaw_deg", 0.0)))
             self._pose_pitch.append(float(pose.get("pitch_deg", 0.0)))
@@ -156,6 +176,8 @@ class Calibrator:
             pose_yaw0=round(statistics.median(self._pose_yaw), 2) if self._pose_yaw else 0.0,
             pose_pitch0=round(statistics.median(self._pose_pitch), 2) if self._pose_pitch else 0.0,
             pose_roll0=round(statistics.median(self._pose_roll), 2) if self._pose_roll else 0.0,
+            smile_rest=round(statistics.median(self._smile), 4) if self._smile else None,
+            brow_rest=round(statistics.median(self._brow), 4) if self._brow else None,
         )
 
     def to_dict(self) -> dict:
@@ -170,6 +192,8 @@ class Calibrator:
             "pose_yaw": [round(x, 3) for x in self._pose_yaw],
             "pose_pitch": [round(x, 3) for x in self._pose_pitch],
             "pose_roll": [round(x, 3) for x in self._pose_roll],
+            "smile": [round(x, 5) for x in self._smile],
+            "brow": [round(x, 5) for x in self._brow],
             "t_start": self._t_start, "t_last": self._t_last,
         }
 
@@ -184,6 +208,8 @@ class Calibrator:
         c._pose_yaw = list(d.get("pose_yaw", []))
         c._pose_pitch = list(d.get("pose_pitch", []))
         c._pose_roll = list(d.get("pose_roll", []))
+        c._smile = list(d.get("smile", []))
+        c._brow = list(d.get("brow", []))
         c._t_start = d.get("t_start")
         c._t_last = d.get("t_last")
         return c

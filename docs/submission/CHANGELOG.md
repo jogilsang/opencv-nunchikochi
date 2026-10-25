@@ -27,7 +27,7 @@ v1 baseline commits: DEVPOST_TEXT.md `bb55def`, README.md `c6652e9`.
 | Head yaw/pitch/roll via solvePnP, roll from eye-line | `src/nunchi/vision/headpose.py` |
 | Latency ~178–282 ms host-variance range, +1.6 ms pose | `docs/cloud/LATENCY.md`, `docs/eval/LATENCY_REGRESSION.md` |
 | Synthetic head-pose error ~3–5°/~2–3° | `docs/eval/VISION_EVAL.md` §6 |
-| Buddy neck/torso/shoulders estimated, not measured body pose | `web/buddy-kinematics.js`, `docs/eval/BODY_POSE_FEASIBILITY.md` |
+| Buddy = face + neck; head pose + expression measured, neck estimated, no body drawn | `web/buddy-kinematics.js`, `docs/eval/BODY_POSE_FEASIBILITY.md` |
 | Lambda arm64 / API Gateway / S3+CloudFront OAC / DynamoDB TTL / SSM / EMF / Bedrock | `docs/cloud/ENDPOINT.md`, `docs/report/TECHNICAL_REPORT.md` §5 |
 | Org SCP 403 → API Gateway swap, 200 | `docs/cloud/ENDPOINT.md` |
 | No-diagnosis guardrail EN+KO | `src/nunchi/agent/guardrails.py`, `tests/agent/test_guardrails_deep.py` |

@@ -17,6 +17,10 @@ def decode_jpeg(data: bytes, max_side: int = 640) -> np.ndarray  # 서비스가 
 - `FrameResult.overlay`(선택): 화면 표시용 **좌표만**(0~1 정규화 얼굴 상자, 랜드마크 점, 어깨·손 점). 픽셀·영상은 아니며 저장·로그·trace 금지. 웹이 프리뷰 위에 그려서 "OpenCV가 무엇을 보고 있는지"를 보여 준다(심사자 이해·UX). 좌표계는 서버가 받은 프레임 기준이고 웹이 거울 반전·크기 변환을 한다.
 - `FrameResult.overlay.pose`(선택, **자세 인형용 숫자만**): `{"yaw_deg":float,"pitch_deg":float,"roll_deg":float,"depth":float,"conf":float}`.
   각도는 **보정(calibration) 때의 정면 자세를 0으로 한 상대값**이며 사용자 본인 시점 기준이다: `yaw_deg>0` 사용자 오른쪽으로 고개를 돌림, `pitch_deg>0` 턱을 숙임(아래를 봄), `roll_deg>0` 사용자 오른쪽 어깨 쪽으로 기울임. `depth`는 보정 때 얼굴 크기 대비 비율(1.0=같은 거리, >1 화면에 더 가까움, 거북목·구부정의 근거). `conf`는 0~1 신뢰도(낮으면 웹은 인형을 고정하고 "추정 불안정" 표시). 값은 FaceMesh 3D 랜드마크와 OpenCV `solvePnP`로 계산한다(어깨·몸통은 추정하지 않음). 이 값은 trace·DB·로그에 남기지 않고, 웹 브라우저 메모리의 세션 되감기에서만 쓴다.
+- **CONTRACT-CHANGE (V14, vision 탭 → `overlay.expr` 추가, 2026-10-25)**: 자세 인형이 **얼굴 표정·목 움직임**을 따라 하도록 `FrameResult.overlay.expr`(선택, **숫자만**)을 더한다. `{"eye_l":0..1|null,"eye_r":0..1|null,"mouth_open":0..1|null,"smile":0..1|null,"brow_raise":0..1|null}`.
+  각 값은 **보정(5초 중립)을 기준으로 정규화한 얼굴 움직임**이며 **감정 추정이 아니다**(행복/슬픔 라벨 없음): `eye_*`=눈별 EAR 열림, `mouth_open`=MAR 기반 턱 벌림, `smile`=입꼬리 폭·높이 기하 변화(미소 **모양** 추정, 기쁨 아님), `brow_raise`=눈썹-눈 거리 변화(랜드마크 불안정 시 `null`). 정의·한계는 `docs/eval/FACE_EXPRESSION.md`. 짧은 평활(중앙값3+EMA, 지연 ≤200ms)·신뢰도 낮으면 `null`. 하위 호환: 필드 없으면 `null` 취급.
+  `expr`는 **응답(overlay)에만** 있고 DynamoDB 상태 블롭·trace에는 **들어가지 않는다**(표정 평활 필터는 직렬화 안 함; 반례 테스트 `tests/vision/test_expression_privacy.py`). 보정 휴식 기준(`smile_rest`·`brow_rest`)만 `ear_open`·`mar_rest`와 같은 baseline 범주로 상태에 남는다.
+  **cloud(C) 탭 할 일**(vision 직접 수정 안 함): ① 서버가 프레임 응답에 `overlay`(=`expr` 포함)를 그대로 실어 web이 받게 한다. ② 스텁(`stubs.py`)은 현재 `overlay`를 만들지 않으므로, 스텁 모드 데모에서 표정 인형을 보이려면 스텁 `analyze`에 `overlay.expr` 예시를 넣는다.
 - `analyze`는 **영상을 반환·저장·로그하지 않는다.** 예외는 삼키지 않고 `FrameResult.quality.issues`로 표현 가능한 건 표현하고, 나머지는 예외로 올린다.
 - `backend`는 런타임 증거로 채운다(`cv2.getBuildInformation()`·COOL 모듈 존재 확인), 설정값을 그대로 쓰지 않는다.
 - 필수 성능: Graviton Lambda 1 vCPU 상당에서 프레임당 **p95 < 250 ms** (최종 측정은 cloud 탭과 협업).
