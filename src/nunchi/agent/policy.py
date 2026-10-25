@@ -141,12 +141,30 @@ def _decide_quality(result: FrameResult, ctx: AgentContext, cfg: PolicyConfig,
     quality_bad = (not q.ok) or bool(q.issues) or (not result.face_present)
     if not quality_bad:
         ctx.bad_quality_streak = 0
+        ctx.bad_quality_since_t = None
         return None
+
+    # A11: a transient *marginal* bad frame should stay quiet — but only when a face is
+    # still present (e.g. briefly dark/blurry). A frame with no usable face is actionable
+    # (the user can fix lighting/position) and still gets a single recalibration request;
+    # repeats are rate-limited by the existing streak/confirm logic, so it does not nag.
+    face_usable = result.face_present and "no_face" not in (q.issues or [])
+    if ctx.bad_quality_since_t is None:
+        ctx.bad_quality_since_t = result.t
+    bad_for = result.t - ctx.bad_quality_since_t
+    ctx.bad_quality_streak += 1
+    if face_usable and bad_for < cfg.quality_warn_min_sustained_s:
+        ctx.note_suppressed("quality_transient")
+        tcalls.append({"tool": "suppress", "args": {"kind": "quality_transient"},
+                       "result_summary": f"suppressed:bad_for={bad_for:.0f}s"})
+        return Decision(action="none", reason="quality_transient_suppressed",
+                        tool_calls=tcalls,
+                        evidence={"bad_for_s": round(bad_for, 1),
+                                  "min_s": cfg.quality_warn_min_sustained_s})
 
     qinfo = tools.get_quality(result)
     tcalls.append({"tool": "get_quality", "args": {}, "result_summary":
                    ("ok" if qinfo["ok"] else ",".join(qinfo["issues"]) or "no_face")})
-    ctx.bad_quality_streak += 1
     issues = list(q.issues) or (["no_face"] if not result.face_present else [])
 
     # repeated bad quality -> escalate to a human confirmation
@@ -285,12 +303,31 @@ def decide(result: FrameResult, ctx: AgentContext, cfg: PolicyConfig,
                               "verdict": verdict, "variant": cfg.low_conf_variant,
                               "note": "OpenCV re-analysis replaced human confirmation"}),
                         {"tool": "second_look", "result_summary": f"{verdict}:{prim.type}"})
-            # unchanged (or no variant) -> ask the human
+            # unchanged (or no variant) -> consider asking the human, but keep it rare (A11)
             about, qen, qko = _confirm_text(prim.type)
+            confirms_this_hour = ctx._within_hour(ctx.confirm_ts, result.t)
+            over_confirm_cap = confirms_this_hour >= cfg.max_confirms_per_hour
+            same_kind_in_a_row = (cfg.confirm_no_repeat_kind
+                                   and ctx.last_confirm_about == about)
+            if over_confirm_cap or same_kind_in_a_row:
+                reason = "confirm_hourly_cap" if over_confirm_cap else "confirm_same_kind"
+                ctx.note_suppressed(f"{reason}:{prim.type}")
+                tools.suppress(reason=f"{reason}:{prim.type}", kind="confirm_rate")
+                tcalls.append({"tool": "suppress",
+                               "args": {"kind": "confirm_rate", "reason": reason},
+                               "result_summary": "suppressed"})
+                ctx.nudges_suppressed += 1
+                return (Decision(action="suppress_focus",
+                                 reason=f"{reason}:{prim.type}", tool_calls=tcalls,
+                                 evidence={"behavior": prim.type,
+                                           "confirms_this_hour": confirms_this_hour}),
+                        {"tool": "suppress", "result_summary": reason})
             tools.ask_confirmation(qen, qko, about=about, behavior=prim.type)
             tcalls.append({"tool": "ask_confirmation", "args": {"about": about},
                            "result_summary": "asked"})
             ctx.confirmations_asked += 1
+            ctx.confirm_ts.append(result.t)
+            ctx.last_confirm_about = about
             ctx.pending_confirmation = {"about": about, "behavior": prim.type,
                                         "frame_t": result.t}
             return (Decision(action="ask_confirmation", message=qen, message_ko=qko,
@@ -336,28 +373,38 @@ def decide(result: FrameResult, ctx: AgentContext, cfg: PolicyConfig,
         cooldown = _cooldown_for(behavior, cfg)
         last = ctx.last_nudge_ms_by_type.get(behavior, 0)
         under_cap = ctx.nudges_sent < cfg.daily_nudge_cap
+        nudges_this_hour = ctx._within_hour(ctx.nudge_ts, result.t)
+        under_hour_cap = nudges_this_hour < cfg.max_nudges_per_hour
         cooled = (now - last) >= cooldown * 1000 if last else True
-        if under_cap and cooled:
+        if under_cap and under_hour_cap and cooled:
             en, ko = _nudge_text(behavior)
             tools.send_nudge(behavior, en, ko, cooldown_s=cooldown)
             tcalls.append({"tool": "send_nudge", "args": {"behavior": behavior},
                            "result_summary": "sent"})
             ctx.last_nudge_ms_by_type[behavior] = now
             ctx.nudges_sent += 1
+            ctx.nudge_ts.append(result.t)
             return (Decision(action="nudge", message=en, message_ko=ko,
                              reason=f"sustained:{behavior}", tool_calls=tcalls,
                              evidence={"behavior": behavior, "duration_s": round(dur, 1)},
                              cooldown_s=cooldown),
                     {"tool": "send_nudge", "result_summary": f"nudge:{behavior}"})
-        # sustained but on cooldown or over cap -> suppress quietly
-        reason = "daily_cap" if not under_cap else "cooldown"
+        # sustained but on cooldown / over daily cap / over hourly cap -> suppress quietly
+        if not under_cap:
+            reason = "daily_cap"
+        elif not under_hour_cap:
+            reason = "hourly_cap"
+        else:
+            reason = "cooldown"
+        ctx.note_suppressed(f"{reason}:{behavior}")
         tools.suppress(reason=f"{reason}:{behavior}", kind="rate")
         tcalls.append({"tool": "suppress", "args": {"kind": "rate", "reason": reason},
                        "result_summary": "suppressed"})
         ctx.nudges_suppressed += 1
         return (Decision(action="suppress_focus", reason=f"{reason}:{behavior}",
                          tool_calls=tcalls, evidence={"behavior": behavior,
-                                                      "duration_s": round(dur, 1)}),
+                                                      "duration_s": round(dur, 1),
+                                                      "nudges_this_hour": nudges_this_hour}),
                 {"tool": "suppress", "result_summary": reason})
 
     # ---- 6. nothing to do ----

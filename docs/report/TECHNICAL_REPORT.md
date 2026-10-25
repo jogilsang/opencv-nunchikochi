@@ -259,7 +259,7 @@ and EAR becomes unstable past ±20° rotation. Glasses are **unmeasured** (no pu
 sample; not faked).
 
 **Web end-to-end & accessibility** (`docs/eval/WEB_E2E.md`): Playwright browser e2e
-**60/60 passed** and the buddy-kinematics unit tests **6/6 passed**; axe-core WCAG 2 A/AA
+**87/87 passed** and the buddy-kinematics unit tests **6/6 passed**; axe-core WCAG 2 A/AA
 scans show **0 hard violations** (two remaining items are hand-verified contrast
 advisories on a zero-area footer span). Run in demo/mock mode; no real camera or AWS needed.
 
@@ -283,8 +283,12 @@ the agent is evaluated with a deterministic harness (stubbed vision/LLM, no netw
   vision result changing the action — a dark frame cleared by `second_look(enhance)` →
   silent; low confidence → ask the human; a forbidden LLM action → guardrail reject →
   rules; a real Bedrock call exceeding the 1 ms budget → rules fallback; a human "no" →
-  raised threshold. The whole-project test suite is **286** (`uv run pytest tests -q`,
-  2026-10-22; `docs/STATUS.md`).
+  raised threshold. On a synthetic 1-hour session the A11 calming cut interruptions
+  **9 → 5** (the first alert still fires at the same moment; the first *repeat* nudge is
+  delayed ~10 min — the cost of being quiet; `docs/eval/ALERT_CALMING.md`). The agent also
+  folds a per-window bad-posture timeline (5/10/30/60 min + hour-rate) and a ≤5-session
+  trend (anonymous per-browser id, numbers only) into the end-of-session report. The
+  whole-project test suite is **320** (`uv run pytest -q`, 2026-10-22; `docs/STATUS.md`).
 
 LLM cost: normal frames are the rules path (zero latency, zero cost); the Bedrock planner
 (Amazon Nova/Claude Haiku-class, Haiku 4.5 used) is called only on ambiguous moments.
@@ -297,9 +301,9 @@ Summary table (detail in the bullets below):
 
 | Status | What |
 |---|---|
-| Built & measured | 286 tests; web e2e 60/60 + buddy unit 6/6, axe 0 hard violations; analyze ~178–282 ms/frame on real Graviton (stable ~178 ms per warm host), ~2.5 s cold Init; frame non-storage proven by 5 counterexample tests. |
-| Synthetic baseline | Vision robustness from public samples + synthetic transforms (not tuned, not accuracy); head-pose error ~3–5° yaw/pitch, ~2–3° roll under jitter. |
-| Not measured | Real-clip per-behaviour accuracy; `drink` on real clips; the posture buddy's neck/torso/shoulders are estimated from head+hand, not measured body pose. |
+| Built & measured | 320 tests; web e2e 87/87 + buddy unit 6/6, axe 0 hard violations; analyze ~178–282 ms/frame on real Graviton (stable ~178 ms per warm host), ~2.5 s cold Init; frame non-storage proven by 5 counterexample tests; synthetic 1-hour calming 9 → 5 alerts. |
+| Synthetic baseline | Vision robustness from public samples + synthetic transforms (not tuned, not accuracy); head-pose error ~3–5° yaw/pitch, ~2–3° roll under jitter; drink typing/chin-rest false-positive paths rejected by a synthetic vertical+rise gate (not real-clip accuracy). |
+| Not measured | Real-clip per-behaviour accuracy; `drink` on real clips (hand-position estimate); the posture buddy's neck/torso/shoulders are estimated from head+hand, not measured body pose; multi-session trend on real longitudinal data (unit-test only). |
 | On hold | Best Use of COOL (Marketplace AMI vs our Lambda zip). |
 
 - **No real-clip vision evaluation yet.** All behaviour accuracy is unmeasured; robustness

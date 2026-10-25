@@ -38,7 +38,7 @@ from nunchi.contracts import Event
 from nunchi.vision.calibration import Baseline
 from nunchi.vision.filters import Hysteresis
 
-_STATE_SCHEMA = "1.0"
+_STATE_SCHEMA = "1.1"  # V12: + hand_dy_hist (drink trajectory); back-compatible read
 
 # drink needs the palm detector (OpenCV Zoo palm_detection_mediapipe, Apache-2.0,
 # cv2.dnn 5.0, ~3.9MB). It is OPTIONAL: if the model file is absent the engine
@@ -81,6 +81,12 @@ class BehaviorThresholds:
     blink_frac: float = 0.70           # enter "eyes narrowing/closing"
     blink_exit_frac: float = 0.80      # re-open above this * ear_open
     deep_frac: float = 0.45            # deep closure (drowsiness)
+    # V13: a closure promoted to deep_blink by DURATION must also be at least this
+    # closed (fraction of baseline EAR). Without this, a shallow-but-sustained
+    # narrowing — squinting at the screen, or eyelids lowered while looking down at
+    # the keyboard — was mislabelled deep_blink (drowsiness) purely because it was
+    # held. Drowsiness needs the eyes actually closing, not just narrowed.
+    deep_hold_frac: float = 0.55       # EAR must be below 0.55*ear_open to go deep-by-duration
     # a closure held at least this long is "sustained" (eyes-closed / micro-sleep);
     # shorter ones are counted as a (likely under-counted) single blink.
     closed_sustained_s: float = 0.7
@@ -92,12 +98,26 @@ class BehaviorThresholds:
     yawn_conf_full_mult: float = 3.0   # MAR multiple mapping to confidence 1.0
 
     # drink: palm centre near the mouth (hand_mouth_dist = dist / face_height).
-    # Conservative: must be close AND held, since chin-rest / mouth-cover look
-    # similar. enter < exit (closer = smaller distance).
-    drink_enter: float = 0.9           # hand within ~0.9 face-heights of mouth
-    drink_exit: float = 1.3
-    drink_hold_s: float = 1.2          # sustained to count (a quick pass is not a drink)
-    drink_conf_full: float = 0.4       # distance (closer) mapping to confidence ~1.0
+    # Conservative (V12): must be close AND at/above mouth height AND show an
+    # up-then-down approach, since a hand resting on the keyboard, a chin-rest
+    # under the jaw, or a hand briefly crossing the face all look "near" by the
+    # bare distance. enter < exit (closer = smaller distance).
+    drink_enter: float = 0.6           # hand within ~0.6 face-heights of mouth (V12: was 0.9)
+    drink_exit: float = 1.0
+    drink_hold_s: float = 1.6          # sustained to count (V12: was 1.2; a longer dwell than typing drift)
+    drink_conf_full: float = 0.3       # distance (closer) mapping to confidence ~1.0
+    # V12 vertical gate: the palm must be at/above the mouth (dy <= this, where
+    # dy = (palm_y - mouth_y)/face_height; negative = above). A hand on the
+    # keyboard / under the chin is BELOW the mouth (dy > 0) and is rejected.
+    drink_dy_max: float = 0.15
+    # V12 trajectory gate: before accepting, the hand must have risen toward the
+    # mouth from clearly below (seen at least this far below within the recent
+    # window) — a stationary chin-rest never rose, so it is rejected.
+    drink_rise_from_dy: float = 0.35   # must have been this far below the mouth recently
+    drink_rise_window_s: float = 2.5   # ...within this long before the dwell
+    # V12: drinks whose confidence is below this are dropped SILENTLY (not sent to
+    # the agent as a toast) to avoid over-asking on weak signals.
+    drink_min_conf: float = 0.25
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -145,6 +165,10 @@ class BehaviorStateMachine:
     _yawn: Hysteresis | None = None
     _drink: Hysteresis | None = None
     _last_face_t: float | None = None  # last time a face was present
+    # V12 drink trajectory: recent (t, dy) of the palm nearest the mouth, so we
+    # can require the hand to have RISEN from below the mouth (a real drink) and
+    # reject a stationary chin-rest. Kept short and serialisable.
+    _hand_dy_hist: list[tuple[float, float]] = field(default_factory=list)
     # PERCLOS-like aggregates (sampling-limited; see module docstring)
     frames_eval: int = 0               # frames with a usable EAR
     frames_eye_closed: int = 0         # of those, frames below blink_frac
@@ -177,7 +201,8 @@ class BehaviorStateMachine:
     def update(self, *, face_present: bool, quality_ok: bool, ear: float | None,
                mar: float | None, roll: float | None, pitch: float | None,
                face_scale: float | None, baseline: Baseline | None, t: float,
-               hand_mouth_dist: float | None = None) -> list[Event]:
+               hand_mouth_dist: float | None = None,
+               hand_mouth_dy: float | None = None) -> list[Event]:
         """Advance the machine by one frame; return Events touching this frame."""
         self._ensure_latches()
         events: list[Event] = []
@@ -199,7 +224,7 @@ class BehaviorStateMachine:
         events += self._update_forward_head(face_scale, pitch, baseline, t)
         events += self._update_eyes(ear, baseline, t)
         events += self._update_yawn(mar, baseline, t)
-        events += self._update_drink(hand_mouth_dist, t)
+        events += self._update_drink(hand_mouth_dist, hand_mouth_dy, t)
         return events
 
     # -- behaviours ---------------------------------------------------------
@@ -273,10 +298,14 @@ class BehaviorStateMachine:
             if tr.start_t is None:
                 tr.start_t = t
             tr.peak = max(tr.peak, 1.0 - frac)   # deeper closure -> higher peak
-            # ongoing: classify deep vs normal by current fraction
+            # ongoing: classify deep vs normal. Deep = actually-closed (below
+            # deep_frac), OR held long AND at least moderately closed
+            # (deep_hold_frac). A shallow sustained narrowing (squint / eyes
+            # lowered while looking down) stays 'blink', not drowsiness (V13).
             is_deep = frac < self.th.deep_frac
             held = (t - tr.start_t) >= self.th.closed_sustained_s
-            kind = "deep_blink" if (is_deep or held) else "blink"
+            deep_by_hold = held and frac < self.th.deep_hold_frac
+            kind = "deep_blink" if (is_deep or deep_by_hold) else "blink"
             conf = self._blink_conf(frac, held)
             tr.active = True
             out.append(Event(type=kind, start=tr.start_t, end=None, confidence=conf,
@@ -286,7 +315,10 @@ class BehaviorStateMachine:
                 # closure ended -> emit the completed interval
                 tr.count += 1
                 dur = t - tr.start_t
-                is_deep = tr.peak >= (1.0 - self.th.deep_frac) or dur >= self.th.closed_sustained_s
+                peak_frac = 1.0 - tr.peak           # smallest EAR fraction reached
+                is_deep = (tr.peak >= (1.0 - self.th.deep_frac)
+                           or (dur >= self.th.closed_sustained_s
+                               and peak_frac < self.th.deep_hold_frac))
                 kind = "deep_blink" if is_deep else "blink"
                 out.append(Event(type=kind, start=tr.start_t, end=t,
                                  confidence=self._blink_conf_peak(tr.peak, dur), count=tr.count))
@@ -304,17 +336,76 @@ class BehaviorStateMachine:
         return self._hold_and_emit("yawn", latched, mult, self.th.yawn_hold_s,
                                    self._yawn_conf(mult), t)
 
-    def _update_drink(self, hand_mouth_dist: float | None, t: float) -> list[Event]:
-        """drink = palm centre near the mouth, HELD (conservative). No palm /
-        no model -> hand_mouth_dist is None -> never fires."""
+    def _update_drink(self, hand_mouth_dist: float | None,
+                      hand_mouth_dy: float | None, t: float) -> list[Event]:
+        """drink = palm raised to the mouth, HELD (V12, conservative).
+
+        Three gates beyond "near the mouth", because typing / chin-rest / a hand
+        crossing the face all look near by the bare distance:
+          1. vertical: the palm must be at/above the mouth (dy <= drink_dy_max).
+             A keyboard hand or a chin-rest under the jaw is BELOW (dy > 0).
+          2. trajectory: the hand must have RISEN from clearly below the mouth
+             within the recent window — a stationary chin-rest never rose.
+          3. silent drop: a confirmed interval below drink_min_conf is discarded
+             (not surfaced to the agent) to avoid over-asking on weak signals.
+        No palm / no model -> hand_mouth_dist is None -> never fires."""
+        th = self.th
+        # record the vertical trajectory sample (only when we have a reading)
+        if hand_mouth_dy is not None:
+            self._hand_dy_hist.append((float(t), float(hand_mouth_dy)))
+            cutoff = t - th.drink_rise_window_s
+            self._hand_dy_hist = [(ts, dy) for ts, dy in self._hand_dy_hist if ts >= cutoff]
+
         if hand_mouth_dist is None:
             return self._decay("drink", t)
         assert self._drink is not None
-        near = self._drink.update(hand_mouth_dist)          # True while below enter..exit
-        # driver for hold/peak: closeness (bigger = closer), bounded >=0
-        driver = max(0.0, self.th.drink_enter - hand_mouth_dist)
-        return self._hold_and_emit("drink", near, driver, self.th.drink_hold_s,
-                                   self._drink_conf(hand_mouth_dist), t)
+
+        # gate 1: must be at/above the mouth. If we have a vertical reading and the
+        # hand is below the mouth, treat it as "not near" (release any latch).
+        below_mouth = hand_mouth_dy is not None and hand_mouth_dy > th.drink_dy_max
+        near_raw = self._drink.update(hand_mouth_dist)   # distance hysteresis
+        near = near_raw and not below_mouth
+
+        tr = self._track("drink")
+        driver = max(0.0, th.drink_enter - hand_mouth_dist)
+        conf = self._drink_conf(hand_mouth_dist)
+
+        if near:
+            if tr.start_t is None:
+                # gate 2: only START a dwell if the hand recently rose from below.
+                # (If we never saw it below the mouth, it's more likely a chin-rest
+                # or a hand that was already parked there — not a drink.)
+                if not self._rose_to_mouth(t):
+                    return []
+                tr.start_t = t
+            tr.peak = max(tr.peak, driver)
+            held = (t - tr.start_t) >= th.drink_hold_s
+            if held:
+                tr.active = True
+                tr.emitted = True
+                return [Event(type="drink", start=tr.start_t, end=None, confidence=conf,
+                              count=tr.count + 1)]
+            return []
+        # released (moved away or dropped below the mouth)
+        if tr.active and tr.emitted and tr.start_t is not None:
+            # gate 3: drop weak intervals silently instead of surfacing them.
+            if conf < th.drink_min_conf and tr.peak < th.drink_min_conf:
+                tr.active = False; tr.emitted = False; tr.start_t = None; tr.peak = 0.0
+                return []
+            tr.count += 1
+            ev = Event(type="drink", start=tr.start_t, end=t, confidence=conf, count=tr.count)
+            tr.active = False; tr.emitted = False; tr.start_t = None; tr.peak = 0.0
+            return [ev]
+        tr.active = False; tr.start_t = None; tr.peak = 0.0
+        return []
+
+    def _rose_to_mouth(self, t: float) -> bool:
+        """True if the nearest palm was seen clearly below the mouth
+        (dy >= drink_rise_from_dy) within the recent window before now — i.e. the
+        hand rose up toward the mouth rather than being parked there."""
+        th = self.th
+        lo = t - th.drink_rise_window_s
+        return any(ts >= lo and dy >= th.drink_rise_from_dy for ts, dy in self._hand_dy_hist)
 
     # -- shared hold/emit logic (for latched, duration-gated behaviours) -----
 
@@ -421,6 +512,7 @@ class BehaviorStateMachine:
             "yawn": self._yawn.to_dict() if self._yawn else None,
             "drink": self._drink.to_dict() if self._drink else None,
             "last_face_t": self._last_face_t,
+            "hand_dy_hist": [[ts, dy] for ts, dy in self._hand_dy_hist],
             "frames_eval": self.frames_eval,
             "frames_eye_closed": self.frames_eye_closed,
         }
@@ -438,6 +530,7 @@ class BehaviorStateMachine:
             sm._yawn = Hysteresis.from_dict(d["yawn"]) if d.get("yawn") else None
             sm._drink = Hysteresis.from_dict(d["drink"]) if d.get("drink") else None
             sm._last_face_t = d.get("last_face_t")
+            sm._hand_dy_hist = [(float(ts), float(dy)) for ts, dy in d.get("hand_dy_hist", [])]
             sm.frames_eval = int(d.get("frames_eval", 0))
             sm.frames_eye_closed = int(d.get("frames_eye_closed", 0))
         except (KeyError, TypeError, ValueError) as e:

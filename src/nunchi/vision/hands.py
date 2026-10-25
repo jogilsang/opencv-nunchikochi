@@ -148,3 +148,37 @@ def hand_mouth_distance(palms: list[Palm], mouth_xy: tuple[float, float],
     mx, my = mouth_xy
     best = min(((p.cx - mx) ** 2 + (p.cy - my) ** 2) ** 0.5 for p in palms)
     return float(best / face_px)
+
+
+@dataclass
+class HandMouthSignal:
+    """Proximity signal of the palm closest to the mouth (V12).
+
+    ``dist`` is the same face-height-normalised distance as
+    :func:`hand_mouth_distance` (feeds the contract's ``hand_mouth_dist``).
+    ``dy`` is the *signed* vertical offset of that palm centre from the mouth,
+    normalised by face height: **negative = palm at/above the mouth** (as when a
+    cup is raised to drink), **positive = palm below the mouth** (hand on the
+    keyboard, or a chin-rest under the jaw). The vertical sign is what separates a
+    real drink from typing / chin-rest, which the bare distance cannot (a hand
+    drifting up under the chin is "near" by distance but clearly below the mouth).
+    """
+    dist: float
+    dy: float
+
+
+def hand_mouth_signal(palms: list[Palm], mouth_xy: tuple[float, float],
+                      face_px: float) -> HandMouthSignal | None:
+    """Distance + signed vertical offset of the palm nearest the mouth.
+
+    Picks the palm with the smallest Euclidean distance to the mouth (same choice
+    as :func:`hand_mouth_distance`) and also reports its vertical offset so the
+    behaviour layer can require the hand to be at/above mouth height. ``None`` when
+    there is no palm or no face scale (matching ``hand_mouth_distance``)."""
+    if not palms or face_px <= 0:
+        return None
+    mx, my = mouth_xy
+    best = min(palms, key=lambda p: (p.cx - mx) ** 2 + (p.cy - my) ** 2)
+    dist = ((best.cx - mx) ** 2 + (best.cy - my) ** 2) ** 0.5 / face_px
+    dy = (best.cy - my) / face_px
+    return HandMouthSignal(dist=float(dist), dy=float(dy))

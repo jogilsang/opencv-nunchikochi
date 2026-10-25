@@ -29,7 +29,7 @@ from nunchi.vision.calibration import Baseline, CalibrationResult, Calibrator
 from nunchi.vision.enhance import enhance_bgr
 from nunchi.vision.events import BehaviorStateMachine
 from nunchi.vision.filters import FilterConfig, StabilizedMetric
-from nunchi.vision.hands import PalmDetector, hand_mouth_distance
+from nunchi.vision.hands import PalmDetector, hand_mouth_signal
 from nunchi.vision.headpose import head_pose_from_landmarks
 from nunchi.vision.landmarks import (
     LandmarkExtractor,
@@ -352,19 +352,25 @@ class VisionEngine:
         H, W = (frame_bgr.shape[0], frame_bgr.shape[1]) if (frame_bgr is not None and getattr(frame_bgr, "size", 0)) else (0, 0)
         raw_ear = raw_mar = None
         hand_mouth = None
+        hand_mouth_dy = None
         if face_present and lm.pts is not None:
             metrics = raw_metrics(lm.pts, baseline_face_px=state.baseline_face_px)
             raw_ear, raw_mar = metrics.ear, metrics.mar   # fast signals (pre-smoothing)
             # V7 drink: palm-near-mouth proximity (only on the real analyze path,
             # never on variants, so second_look/zoom_face can't create 'drink').
+            # V12: also carry the signed vertical offset (dy) so the behaviour
+            # layer can require the hand to be AT/ABOVE the mouth and to have risen
+            # (a keyboard hand / chin-rest is near by distance but below the mouth).
             if mutate and self._palm.available:
                 palms = self._palm.detect(frame_bgr)
                 mouth = mouth_centre(lm.pts)
                 # normalise by calibrated face height if available, else current bbox
                 fpx = float(state.baseline_face_px) if state.baseline_face_px else float(lm.bbox[3] if lm.bbox else 0)
-                hand_mouth = hand_mouth_distance(palms, mouth, fpx)
-                if hand_mouth is not None:
-                    metrics.hand_mouth_dist = round(hand_mouth, 3)
+                sig = hand_mouth_signal(palms, mouth, fpx)
+                if sig is not None:
+                    hand_mouth = sig.dist
+                    hand_mouth_dy = sig.dy
+                    metrics.hand_mouth_dist = round(sig.dist, 3)
             if mutate:
                 if metrics.head_roll_deg is not None:
                     metrics.head_roll_deg = round(state._roll.update(metrics.head_roll_deg).smoothed, 2)
@@ -403,6 +409,7 @@ class VisionEngine:
                 pitch=metrics.head_pitch_proxy,
                 face_scale=metrics.face_scale,
                 hand_mouth_dist=hand_mouth,
+                hand_mouth_dy=hand_mouth_dy,
                 baseline=state.baseline,
                 t=float(t),
             )

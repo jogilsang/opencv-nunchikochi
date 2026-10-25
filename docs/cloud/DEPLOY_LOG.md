@@ -270,3 +270,98 @@ DynamoDB untouched** (service code unchanged; W15 verified e2e 3× 60/60 @ 52d6d
 | index.html | 5428e603fececba1 | 5428e603fececba1 | MATCH |
 
 Lambda / API Gateway / DynamoDB config left exactly as the C11 baseline.
+
+## C14 — history + trend wired to the service, redeploy, 2026-10-23
+
+Same stack `nunchi` (captain / us-east-1). **Service code only** — CloudFormation template
+unchanged (`deploy` → "No changes"), so the Lambda zip was pushed + `lambda
+update-function-code` (C3 gotcha), code 57,131,468 → 57,142,667. No new resource; DynamoDB
+key *format* extended only (USER#/DAY#, same `nunchi-sessions` table, pk/sk schema). Mem
+1536 / timeout 15 / reserved concurrency 5 / env (5 baseline vars) / cost alarm untouched.
+
+What changed (cloud-owned `src/nunchi/service/`):
+- New `summary_store.py` (Memory/Dynamo) persisting the A11 numbers-only summary at
+  `USER#<sha256(token)[:32]>` / `DAY#<date>#<session-id>`, TTL 30 days, behind a strict
+  `sanitize_summary` whitelist (image/landmark/overlay/coord keys dropped at any depth).
+- `app.py`: `X-Anon-Id` header (16–64 hex → hashed; else no-record mode) + CORS header;
+  a `SummaryAccumulator` folded alongside the flat aggregates so `/end` emits `timeline`;
+  `/end` attaches `trend` (agent `compare`, last ≤5 sessions) and persists the day row;
+  `/v1/summary` returns `history` (≤5, oldest-first). A store failure never fails `/end`.
+
+Tests: `tests/service/test_history_trend.py` (normal 2, exception 2, error 1, + two
+privacy proofs). `uv run pytest tests/service tests/review` → **41 passed** (was 34;
+`test_no_persist` + the Q1 privacy verifier still green).
+
+### Verify (direct curl + DDB, real face frames)
+
+| check | result |
+|---|---|
+| `/healthz` | 200 — cv 5.0.0, aarch64, stubs false |
+| no `X-Api-Key` → `POST /v1/sessions` | 401 |
+| 2 sessions, same date + anon → `GET /v1/summary` `history` | **2** (same-day no overwrite) |
+| `/end` response | `summary.timeline` present, `report.trend` present |
+| DynamoDB `USER#<hash>` rows | 2 distinct sk `DAY#2026-10-26#<full-session-id>` |
+| stored item value types | only N / S(label) / M / L / NULL — **no `image/jpeg/base64/landmark/overlay/coord`** key |
+
+- Could NOT drive a non-"na" `trend` over the live API: a non-null `per_hour_rate` needs a
+  >10-minute session with real bad-posture events, which synthetic frames can't produce.
+  The improving/worsening path is proven by the unit test (seeded prior rates). Live checks
+  covered persistence, history growth, response shape and the numbers-only invariant.
+- Test rows written during verification sit under random anonymous hashes and self-expire
+  via the 30-day TTL.
+
+## C15 — web (W16/W17) CloudFront redeploy + CORS X-Anon-Id, 2026-10-23
+
+Same stack `nunchi` (captain / us-east-1). Web static only, PLUS one gateway-CORS config
+change (no new resource, no Lambda code change). Mem 1536 / timeout 15 / reserved
+concurrency 5 / env (5 baseline) / SSM key / cost alarms untouched.
+
+- `s3 sync web/` (exclude config.json/config.example.json/*.md) uploaded the W16/W17 changed
+  files (app.js, i18n.js, index.html, styles.css, api.js, demo.js, mock.js,
+  assets/demo-session.json, e2e/{run,capture-w16,capture-w17}.mjs); `web/config.json`
+  apiBase-only re-uploaded. CloudFront `/*` invalidation waited to Completed.
+- **Template**: `HttpApi.CorsConfiguration.AllowHeaders` += `x-anon-id` (W17 sends it; the
+  gateway preflight was rejecting it). `cloudformation deploy` applied the change set.
+
+### Hash compare — deployed vs local (`shasum -a 256`, all deployable files)
+
+- 16 files compared (js/css/html/json + vendor three.module.min.js); **MISMATCH = 0**.
+- `/` 200, `/?demo=1` 200, `/config.json` 200 (apiBase only, no key); deployed `index.html`
+  loads `app.js` (ESM entry) and matches local.
+
+### Live smoke (synthetic frames; key read from SSM into a shell var, never printed)
+
+| check | result |
+|---|---|
+| same `X-Anon-Id`, 2 sessions → `GET /v1/summary` `history` | **2** |
+| `/end` response | `summary.timeline` + `report.trend` present (both sessions) |
+| CORS preflight `OPTIONS /v1/frames` (Origin CloudFront, req `X-Anon-Id`) | 200, `access-control-allow-headers` includes `x-anon-id`, allow-origin = CloudFront |
+| DynamoDB `USER#` summaries scan | no `image/jpeg/base64/landmark/overlay/coord` key |
+
+### Playwright screenshots (deployed URL, pageerrors 0)
+
+- `docs/screenshots/c15-{desktop,mobile}-{start,report}.png`. Desktop/mobile first screen
+  (demo-first clarity, anonymous-number privacy note) and report (POSTURE RECORD 5/10/30/60
+  buckets ~21.6/h, COMPARED WITH EARLIER SESSIONS trend "21.6/h vs 28.75/h avg" with
+  "Example data" label, replay buddy). Opened and eyeballed. Temp capture script not committed.
+
+## C16 — web (W18/W19) CloudFront redeploy, 2026-10-23
+
+Same stack `nunchi` (captain / us-east-1). **Web static only — no server/template/resource
+change.** W18 (collapse the empty posture-record chart on short sessions) + W19 (show the
+bad-posture count + bars even when the hourly rate is withheld, with a "not comparable yet"
+note). W18/W19 web commits at 9541d88.
+
+- `s3 sync web/` (exclude config.json/config.example.json/*.md) uploaded the changed files
+  (app.js, i18n.js, e2e/{run,capture-w19}.mjs); `web/config.json` re-written apiBase-only
+  (no key) and uploaded. CloudFront `/*` invalidation waited to Completed.
+- Hash compare deployed vs local (`shasum -a 256`, all 16 deployable files
+  js/css/html/json + vendor three): **MISMATCH = 0**. `/` 200, `/?demo=1` 200,
+  `/config.json` 200 (apiBase only, no key).
+- API unchanged: `/healthz` 200, no-key `POST /v1/sessions` 401, CORS preflight
+  `OPTIONS /v1/frames` (Origin CloudFront) still returns
+  `access-control-allow-headers: content-type,x-anon-id,x-api-key`.
+- Playwright screenshots of the deployed URL (pageerrors 0):
+  `docs/screenshots/c16-{desktop,mobile}-report.png` — demo report posture-record card
+  (5/10/30/60 buckets, ~21.6/h) + earlier-session trend; opened and eyeballed. Temp capture
+  script not committed. Lambda / concurrency 5 / env / SSM key / cost alarms untouched.

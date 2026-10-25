@@ -252,7 +252,7 @@ Resources:
           - "http://localhost:8099"
           - "http://127.0.0.1:8099"
         AllowMethods: [GET, POST, OPTIONS]
-        AllowHeaders: [content-type, x-api-key]
+        AllowHeaders: [content-type, x-api-key, x-anon-id]
         MaxAge: 300
       Tags: { project: nunchikochi, delete-after: !Ref DeleteAfter }
 

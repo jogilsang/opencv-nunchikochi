@@ -11,14 +11,19 @@ export class ApiError extends Error {
 }
 
 export class Api {
-  constructor({ apiBase, apiKey } = {}) {
+  constructor({ apiBase, apiKey, anonId } = {}) {
     this.apiBase = (apiBase || "").replace(/\/$/, "");
     this.apiKey = apiKey || "";
+    // W17: anonymous browser id (numbers-only continuity). Sent as X-Anon-Id on every
+    // request so the server can link a user's daily summaries without any login or PII.
+    // CORS on the service already allows X-Anon-Id (CONTRACTS §3 allow_headers).
+    this.anonId = anonId || "";
   }
 
   _headers(extra = {}) {
     const h = { ...extra };
     if (this.apiKey) h["X-Api-Key"] = this.apiKey;
+    if (this.anonId) h["X-Anon-Id"] = this.anonId;
     return h;
   }
 

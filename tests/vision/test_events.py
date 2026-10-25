@@ -203,9 +203,7 @@ def test_untrusted_reemits_ongoing_without_confirm():
     assert any(e.type == "head_tilt" and e.end is None for e in evs)
 
 
-# -- drink unsupported --------------------------------------------------------
-
-# -- drink: supported from V7 but needs the palm signal ----------------------
+# -- drink: supported from V7, tightened in V12 to cut false positives --------
 
 def test_drink_not_emitted_without_hand_signal():
     """V7: drink is supported, but with no palm signal (hand_mouth_dist None) it
@@ -220,27 +218,147 @@ def test_drink_not_emitted_without_hand_signal():
     assert all(e.type != "drink" for e in seen)
 
 
-def test_drink_normal_hand_held_near_mouth():
-    """normal: palm held near the mouth past the hold time -> drink ongoing."""
+def _drink_feed(sm, bl, *, dist, dy, t):
+    return sm.update(face_present=True, quality_ok=True, ear=0.30, mar=0.10, roll=0.0,
+                     pitch=0.5, face_scale=1.0, baseline=bl, t=t,
+                     hand_mouth_dist=dist, hand_mouth_dy=dy)
+
+
+def test_drink_normal_rise_then_hold_at_mouth():
+    """normal: hand rises from below the mouth, then dwells at/above it past the
+    hold time -> drink. The up-then-down approach is what a real drink looks like."""
     sm = BehaviorStateMachine()
     bl = _baseline()
-    sm.update(face_present=True, quality_ok=True, ear=0.30, mar=0.10, roll=0.0,
-              pitch=0.5, face_scale=1.0, baseline=bl, t=0.0, hand_mouth_dist=0.6)
-    evs = sm.update(face_present=True, quality_ok=True, ear=0.30, mar=0.10, roll=0.0,
-                    pitch=0.5, face_scale=1.0, baseline=bl, t=1.4, hand_mouth_dist=0.6)
+    # below the mouth (keyboard/lap) -> establishes the rise history
+    _drink_feed(sm, bl, dist=0.9, dy=0.5, t=0.0)
+    # raised to the mouth (at/above), held past drink_hold_s (1.6)
+    _drink_feed(sm, bl, dist=0.3, dy=-0.05, t=0.6)
+    evs = _drink_feed(sm, bl, dist=0.3, dy=-0.05, t=2.3)
     drink = [e for e in evs if e.type == "drink"]
     assert drink and drink[0].end is None and 0.0 < drink[0].confidence <= 1.0
 
 
-def test_drink_exception_brief_pass_not_drink():
-    """exception: a hand passing the mouth briefly (< hold) is not a drink."""
+def test_drink_normal_no_cup_hand_at_mouth_sustained():
+    """normal: even without a cup, a bare hand that rose to the mouth and stays
+    there (e.g. sipping from a glass held low, or hand to lips) counts if held."""
     sm = BehaviorStateMachine()
     bl = _baseline()
-    sm.update(face_present=True, quality_ok=True, ear=0.30, mar=0.10, roll=0.0,
-              pitch=0.5, face_scale=1.0, baseline=bl, t=0.0, hand_mouth_dist=0.6)
-    evs = sm.update(face_present=True, quality_ok=True, ear=0.30, mar=0.10, roll=0.0,
-                    pitch=0.5, face_scale=1.0, baseline=bl, t=0.3, hand_mouth_dist=2.0)
+    _drink_feed(sm, bl, dist=0.8, dy=0.4, t=0.0)      # from below
+    _drink_feed(sm, bl, dist=0.25, dy=0.0, t=0.5)     # at the mouth
+    evs = _drink_feed(sm, bl, dist=0.25, dy=0.0, t=2.2)  # held >= 1.6s
+    assert any(e.type == "drink" for e in evs)
+
+
+def test_drink_exception_typing_hand_below_mouth():
+    """exception: a hand parked on the keyboard — near by distance but BELOW the
+    mouth (dy > drink_dy_max) — never counts, however long it stays."""
+    sm = BehaviorStateMachine()
+    bl = _baseline()
+    evs = []
+    for i in range(8):                                 # 0.0 .. 2.8s, all below
+        evs += _drink_feed(sm, bl, dist=0.5, dy=0.5, t=i * 0.4)
     assert all(e.type != "drink" for e in evs)
+
+
+def test_drink_exception_chin_rest_stationary():
+    """exception: a hand resting under the chin is near the mouth and roughly at
+    mouth height, but it never ROSE from below -> not a drink (no trajectory)."""
+    sm = BehaviorStateMachine()
+    bl = _baseline()
+    evs = []
+    # parked near the mouth the whole time, never seen clearly below first
+    for i in range(8):
+        evs += _drink_feed(sm, bl, dist=0.35, dy=0.1, t=i * 0.4)
+    assert all(e.type != "drink" for e in evs)
+
+
+def test_drink_exception_brief_pass_not_drink():
+    """exception: a hand that rises and passes the mouth briefly (< hold) is not a
+    drink."""
+    sm = BehaviorStateMachine()
+    bl = _baseline()
+    _drink_feed(sm, bl, dist=0.9, dy=0.5, t=0.0)       # below
+    _drink_feed(sm, bl, dist=0.3, dy=-0.05, t=0.4)     # at mouth briefly
+    evs = _drink_feed(sm, bl, dist=2.0, dy=0.6, t=0.7) # moved away before hold
+    assert all(e.type != "drink" for e in evs)
+
+
+def test_drink_v13_no_flicker_under_jitter_320x240():
+    """V13: at low res the palm box jitters frame-to-frame. While it stays within
+    the distance hysteresis band (below exit=1.0) the drink interval must stay
+    ONGOING (one interval), not flicker on/off. Checks the hold stays latched."""
+    sm = BehaviorStateMachine()
+    bl = _baseline()
+    _drink_feed(sm, bl, dist=0.9, dy=0.5, t=0.0)        # rose from below
+    _drink_feed(sm, bl, dist=0.35, dy=-0.05, t=0.6)     # at mouth, dwell starts
+    _drink_feed(sm, bl, dist=0.35, dy=-0.05, t=2.3)     # held -> ongoing drink
+    starts = ends = 0
+    # jitter distance across the band + small vertical wobble, all still "near"
+    for i, d in enumerate([0.5, 0.9, 0.4, 0.8, 0.55]):
+        evs = _drink_feed(sm, bl, dist=d, dy=-0.02 + 0.03 * (i % 2), t=2.6 + i * 0.3)
+        for e in evs:
+            if e.type == "drink":
+                ends += e.end is not None
+                starts += e.end is None
+    # stays ongoing throughout the jitter, never closes-and-reopens
+    assert ends == 0 and starts >= 1
+    assert sm.tracks["drink"].count == 0        # no completed (flicker) intervals yet
+
+
+# -- V13: everyday-action false-positive guards -------------------------------
+
+def test_v13_squint_held_is_blink_not_deep():
+    """normal: a shallow narrowing held long (squinting at the screen, eyes
+    lowered to the keyboard) stays 'blink' — it is NOT drowsiness. frac 0.20/0.30
+    = 0.67 is above deep_hold_frac(0.55), so duration alone can't promote it."""
+    sm = BehaviorStateMachine()
+    bl = _baseline()
+    _feed(sm, bl, ear=0.30, t=0.0)                       # open
+    _feed(sm, bl, ear=0.20, t=0.4)                       # narrowed (frac .67 < blink_frac .70)
+    evs = _feed(sm, bl, ear=0.20, t=1.4)                 # held > 0.7s
+    kinds = {e.type for e in evs}
+    assert "blink" in kinds and "deep_blink" not in kinds
+
+
+def test_v13_genuine_long_closure_still_deep():
+    """normal: eyes actually closed (frac well below deep_frac) and held is still
+    deep_blink — the drowsiness signal is preserved (cost check: we did not blunt
+    real deep closures)."""
+    sm = BehaviorStateMachine()
+    bl = _baseline()
+    _feed(sm, bl, ear=0.30, t=0.0)
+    _feed(sm, bl, ear=0.08, t=0.4)                       # frac .27 < deep_frac .45
+    evs = _feed(sm, bl, ear=0.08, t=1.4)
+    assert any(e.type == "deep_blink" for e in evs)
+
+
+def test_v13_brief_mouth_open_laugh_not_yawn():
+    """exception: a brief wide mouth (laugh / a spoken vowel) that closes before
+    yawn_hold_s is not a yawn — the hold gate already rejects transient opens."""
+    sm = BehaviorStateMachine()
+    bl = _baseline()
+    _feed(sm, bl, mar=0.25, t=0.0)                       # over yawn enter (0.18)
+    evs = _feed(sm, bl, mar=0.10, t=0.4)                 # closed well before 1.2s
+    assert all(e.type != "yawn" for e in evs)
+
+
+def test_v13_glasses_touch_pitch_spike_not_forward_head():
+    """exception: a brief pitch spike (adjusting glasses, a quick glance down)
+    that returns before fwd_hold_s is not forward_head."""
+    sm = BehaviorStateMachine()
+    bl = _baseline()
+    _feed(sm, bl, face_scale=1.0, pitch=0.60, t=0.0)     # chin-down spike
+    evs = _feed(sm, bl, face_scale=1.0, pitch=0.50, t=0.3)  # back to frontal fast
+    assert all(e.type != "forward_head" for e in evs)
+
+
+def test_v13_deep_hold_frac_threshold_error_tolerant():
+    """error-tolerance: an unknown key in a thresholds blob is ignored and the new
+    deep_hold_frac keeps its default (no crash on older/newer blobs)."""
+    th = BehaviorThresholds.from_dict({"deep_hold_frac": 0.5, "bogus": 1})
+    assert th.deep_hold_frac == 0.5
+    th2 = BehaviorThresholds.from_dict({"away_seconds": 2.0})   # no deep_hold_frac
+    assert th2.deep_hold_frac == 0.55                           # default preserved
 
 
 # -- serialisation / error ----------------------------------------------------

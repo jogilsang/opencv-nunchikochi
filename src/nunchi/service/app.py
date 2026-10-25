@@ -11,8 +11,10 @@ Run locally:  uv run uvicorn nunchi.service.app:app
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import time
 from typing import Any
 
@@ -25,6 +27,7 @@ from nunchi.contracts import SCHEMA_VERSION, FrameResult, SessionSummary
 from . import metrics as _metrics
 from .deps import get_services
 from .state import make_state_store
+from .summary_store import make_summary_store
 
 # --- limits / config (CONTRACTS §3) ---------------------------------------
 MAX_FRAME_BYTES = 200 * 1024            # request size cap: 200 KB (CONTRACTS §3 hard contract)
@@ -102,10 +105,11 @@ def create_app() -> FastAPI:
         allow_origins=origins or ["*"] if not origins_env else origins,
         allow_credentials=False,
         allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["X-Api-Key", "Content-Type"],
+        allow_headers=["X-Api-Key", "X-Anon-Id", "Content-Type"],
     )
 
     store = make_state_store()
+    summary_store = make_summary_store()
     svc = get_services()
 
     # In-process trace & summary buffers (demo scope; CONTRACTS §4 persists summary to DynamoDB in C2+).
@@ -164,6 +168,9 @@ def create_app() -> FastAPI:
             "confirmations_asked": 0,
             "recalibrations": 0,
             "frame_ts": [],
+            # A11 timeline source: a SummaryAccumulator folded alongside the plain
+            # aggregates above, stored as numbers-only JSON (see _acc_dump/_acc_load).
+            "acc": _acc_dump(_new_accumulator(session_id, client_date)),
         }
         store.put(session_id, state)
         traces[session_id] = []
@@ -274,6 +281,7 @@ def create_app() -> FastAPI:
     def end_session(
         session_id: str,
         x_api_key: str | None = Header(default=None, alias="X-Api-Key"),
+        x_anon_id: str | None = Header(default=None, alias="X-Anon-Id"),
     ):
         if (err := _check_key(x_api_key)) is not None:
             return err
@@ -281,28 +289,76 @@ def create_app() -> FastAPI:
         if state is None:
             return _error("session_not_found", "unknown or expired session", 404)
         summary = _build_summary(session_id, state)
+        # A11: build the numbers-only timeline from the folded accumulator (if present).
+        timeline = _timeline_for(state)
+        summary_out = summary.to_dict()
+        if timeline is not None:
+            summary_out["timeline"] = timeline
+        today_rate = (timeline or {}).get("per_hour_rate") if timeline else None
+
+        # "Same user" link is the anonymous browser token, stored only as a hash
+        # (USER#<hash>); the raw token never touches the DB or logs. No/invalid token =>
+        # "no-record mode": this session is simply not persisted.
+        user_hash = _anon_hash(x_anon_id)
+        history: list[dict[str, Any]] = []
+        if user_hash:
+            try:
+                history = summary_store.recent(user_hash, 5)  # oldest-first, pre-store
+            except Exception:  # noqa: BLE001 - a store read failure must not fail /end
+                history = []
+
         prev = by_date.get(_prev_date(summary.date)) if summary.date else None
         report = svc.agent.report(summary, prev)
+        # A11 multi-session trend from the bad-posture per-hour rate (history = prior sessions).
+        try:
+            cmp_full = compare(summary, prev, history=history, today_rate=today_rate)
+            report = {**report, "trend": cmp_full.get("trend")}
+        except Exception:  # noqa: BLE001 - trend is additive; never fail /end over it
+            report = {**report, "trend": None}
+
         summaries[session_id] = summary
         if summary.date:
             by_date[summary.date] = summary
+        # Persist numbers-only daily summary for this anonymous user (if any). Same-day
+        # repeat sessions must not overwrite: the sk includes a per-session suffix. The
+        # session id's timestamp prefix can collide for rapid sessions, so use the whole
+        # id (its random tail is unique) rather than just the first 8 chars.
+        if user_hash:
+            try:
+                summary_store.put_day(
+                    user_hash, summary.date or "", session_id, summary_out
+                )
+            except Exception:  # noqa: BLE001 - CONTRACTS: /end succeeds even if the record write fails
+                _metrics.error("summary_persist_failed")
+
         store.delete(session_id)  # state no longer needed; aggregates kept
         _metrics.session_event("end")
-        return {"summary": summary.to_dict(), "report": report}
+        return {"summary": summary_out, "report": report}
 
     # --- 5. summary by date ---------------------------------------------
     @app.get("/v1/summary")
     def get_summary(
         date: str,
         x_api_key: str | None = Header(default=None, alias="X-Api-Key"),
+        x_anon_id: str | None = Header(default=None, alias="X-Anon-Id"),
     ):
         if (err := _check_key(x_api_key)) is not None:
             return err
         cur = by_date.get(date)
         prev = by_date.get(_prev_date(date)) if date else None
+        # A11: include the anonymous user's most recent summaries (<=5, oldest-first) so
+        # the web app can draw a trend. Empty when there is no/invalid token.
+        history: list[dict[str, Any]] = []
+        user_hash = _anon_hash(x_anon_id)
+        if user_hash:
+            try:
+                history = summary_store.recent(user_hash, 5)
+            except Exception:  # noqa: BLE001 - read failure degrades to empty history
+                history = []
         return {
             "summary": cur.to_dict() if cur else None,
             "previous": prev.to_dict() if prev else None,
+            "history": history,
         }
 
     # --- 6. trace --------------------------------------------------------
@@ -457,7 +513,11 @@ def _to_jsonable(state: Any) -> dict[str, Any]:
 
 
 def _accumulate(state: dict[str, Any], result: FrameResult, decision) -> None:
-    """Fold a frame's events + decision into the running aggregate (numbers only)."""
+    """Fold a frame's events + decision into the running aggregate (numbers only).
+
+    Keeps two parallel views: the flat counts/seconds/longest dicts used by
+    `_build_summary`, and a serialized SummaryAccumulator (`state["acc"]`) that also
+    tracks per-event intervals so `/end` can emit the A11 `timeline` (numbers only)."""
     for ev in result.events:
         state["counts"][ev.type] = state["counts"].get(ev.type, 0) + 1
         if ev.end is not None:
@@ -472,6 +532,15 @@ def _accumulate(state: dict[str, Any], result: FrameResult, decision) -> None:
         state["confirmations_asked"] += 1
     elif decision.action == "request_recalibration":
         state["recalibrations"] += 1
+    # A11 timeline source: fold the same frame into the SummaryAccumulator, if available.
+    acc = _acc_load(state.get("acc"))
+    if acc is not None:
+        try:
+            acc.add_frame(result)
+            acc.note_decision(decision.action)
+            state["acc"] = _acc_dump(acc)
+        except Exception:  # noqa: BLE001 - timeline is best-effort; never fail a frame over it
+            pass
 
 
 def _build_summary(session_id: str, state: dict[str, Any]) -> SessionSummary:
@@ -497,6 +566,97 @@ def _prev_date(date: str) -> str:
     except ValueError:
         return ""
     return (d - _dt.timedelta(days=1)).isoformat()
+
+
+# --- A11 anon-id + timeline helpers (cloud tab) ---------------------------
+_ANON_RE = re.compile(r"^[0-9a-fA-F]{16,64}$")
+
+
+def _anon_hash(token: str | None) -> str | None:
+    """Map a browser anonymous token to the DB partition suffix, or None (no-record mode).
+
+    Accepts a 16–64 char hex token only; anything else returns None so the session is
+    simply not persisted (never an error — brief §1). The raw token is never stored or
+    logged: we return sha256(token).hexdigest()[:32] for use as USER#<hash>.
+    """
+    if not token or not _ANON_RE.match(token):
+        return None
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:32]
+
+
+def _new_accumulator(session_id: str, date: str):
+    """Build a fresh SummaryAccumulator, or None if the agent helper is unavailable (stub-only)."""
+    try:
+        from nunchi.agent import SummaryAccumulator  # type: ignore
+    except Exception:  # noqa: BLE001 - agent not wired; timeline simply absent
+        return None
+    return SummaryAccumulator(session_id=session_id, date=date)
+
+
+# Fields of SummaryAccumulator that are JSON-storable (numbers/strings only). Sets and
+# tuples are converted on dump/load. Image data never appears in any of these.
+_ACC_FIELDS = (
+    "session_id", "date", "_t_min", "_t_max", "counts", "seconds", "longest_s",
+    "_open", "nudges_sent", "nudges_suppressed", "confirmations_asked", "recalibrations",
+    "_bad_posture_starts", "_bad_posture_open", "_bad_posture_intervals", "_end_t",
+)
+
+
+def _acc_dump(acc) -> dict[str, Any] | None:
+    """Serialize a SummaryAccumulator to numbers-only JSON for the session state store."""
+    if acc is None:
+        return None
+    out: dict[str, Any] = {}
+    for f in _ACC_FIELDS:
+        out[f] = getattr(acc, f, None)
+    # sets/tuples are not JSON types: store _counted as a list of [type, start] pairs,
+    # and intervals as lists of [start, end].
+    out["_counted"] = [[t, s] for (t, s) in getattr(acc, "_counted", set())]
+    out["_bad_posture_intervals"] = [
+        [s, e] for (s, e) in getattr(acc, "_bad_posture_intervals", [])
+    ]
+    return out
+
+
+def _acc_load(data: dict[str, Any] | None):
+    """Rebuild a SummaryAccumulator from stored JSON, or None if unavailable/invalid."""
+    if not data:
+        return None
+    try:
+        from nunchi.agent import SummaryAccumulator  # type: ignore
+    except Exception:  # noqa: BLE001
+        return None
+    acc = SummaryAccumulator(session_id=str(data.get("session_id", "")),
+                             date=str(data.get("date", "")))
+    for f in _ACC_FIELDS:
+        if f in ("session_id", "date"):
+            continue
+        if f in data and data[f] is not None:
+            setattr(acc, f, data[f])
+    acc._counted = {(row[0], row[1]) for row in data.get("_counted", []) if len(row) == 2}
+    acc._bad_posture_intervals = [
+        (row[0], row[1]) for row in data.get("_bad_posture_intervals", []) if len(row) == 2
+    ]
+    return acc
+
+
+def _timeline_for(state: dict[str, Any]) -> dict[str, Any] | None:
+    """Finalize the session's accumulator and return the A11 timeline (numbers only), or None."""
+    acc = _acc_load(state.get("acc"))
+    if acc is None:
+        return None
+    try:
+        acc.finalize()
+        return acc.timeline()
+    except Exception:  # noqa: BLE001 - timeline is best-effort
+        return None
+
+
+def compare(*args, **kwargs):  # noqa: D401 - CONTRACTS name; delegates to the agent helper
+    """Lazy delegate to nunchi.agent.compare so the module imports even in stub-only builds."""
+    from nunchi.agent import compare as _agent_compare  # type: ignore
+
+    return _agent_compare(*args, **kwargs)
 
 
 app = create_app()

@@ -11,7 +11,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from nunchi.vision.hands import Palm, PalmDetector, _anchors, hand_mouth_distance
+from nunchi.vision.hands import (
+    Palm,
+    PalmDetector,
+    _anchors,
+    hand_mouth_distance,
+    hand_mouth_signal,
+)
 
 MODELS = Path(__file__).resolve().parents[2] / "models"
 PALM = MODELS / "palm_detection_mediapipe_2023feb.onnx"
@@ -60,6 +66,36 @@ def test_hand_mouth_distance_picks_closest():
     palms = [Palm(300, 300, 40, 40, 0.9), Palm(120, 100, 40, 40, 0.9)]
     d = hand_mouth_distance(palms, mouth, face_px=100.0)
     assert d == pytest.approx(20.0 / 100.0, abs=1e-6)
+
+
+# -- hand_mouth_signal (pure, V12: distance + signed vertical offset) ---------
+
+def test_hand_mouth_signal_sign_above_vs_below():
+    """normal: dy is negative when the palm is ABOVE the mouth (drink) and
+    positive when BELOW (keyboard/chin-rest)."""
+    mouth = (100.0, 100.0)
+    above = hand_mouth_signal([Palm(100, 80, 40, 40, 0.9)], mouth, face_px=100.0)
+    below = hand_mouth_signal([Palm(100, 150, 40, 40, 0.9)], mouth, face_px=100.0)
+    assert above is not None and below is not None
+    assert above.dy == pytest.approx(-0.20, abs=1e-6)   # 20px above / 100px
+    assert below.dy == pytest.approx(0.50, abs=1e-6)    # 50px below / 100px
+    assert above.dist > 0 and below.dist > 0
+
+
+def test_hand_mouth_signal_dist_matches_distance_helper():
+    """normal: the signal's dist equals the standalone distance helper (same palm
+    choice), so the contract field is unchanged."""
+    mouth = (100.0, 100.0)
+    palms = [Palm(300, 300, 40, 40, 0.9), Palm(120, 100, 40, 40, 0.9)]
+    sig = hand_mouth_signal(palms, mouth, face_px=100.0)
+    assert sig is not None
+    assert sig.dist == pytest.approx(hand_mouth_distance(palms, mouth, 100.0), abs=1e-9)
+
+
+def test_hand_mouth_signal_none_without_palm():
+    """exception: no palm or no face scale -> None (same as the distance helper)."""
+    assert hand_mouth_signal([], (0, 0), face_px=100.0) is None
+    assert hand_mouth_signal([Palm(0, 0, 10, 10, 0.9)], (0, 0), face_px=0.0) is None
 
 
 # -- detector availability ----------------------------------------------------

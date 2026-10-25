@@ -41,6 +41,13 @@ SCRIPT: list[Shot] = [
     Shot("blink", "blink", 12, "평소보다 또렷하게 여러 번 깜빡이세요(각 깜빡임을 분명히)."),
     Shot("deep_blink", "deep_blink", 14, "눈을 1초 이상 지그시 감았다 뜨기를 3회 반복하세요."),
     Shot("yawn", "yawn", 14, "입을 크게 벌려 하품을 2~3회 하세요(각 2초 이상)."),
+    Shot("drink", "drink", 16, "컵이나 물병을 손에 들고 입으로 가져가 마시는 동작을 3회 하세요(한 번에 2초 이상, 손이 입 높이까지 올라오게)."),
+    # 아래 셋은 '이벤트가 나오면 안 되는' 오탐 점검용 음성(negative) 클립입니다.
+    # 정답은 '이벤트 없음'이므로 behavior=None(라벨 비움). 평가에서 drink/forward_head/
+    # deep_blink 오탐이 이 구간에 찍히면 그대로 오탐으로 집계됩니다.
+    Shot("typing", None, 30, "손을 키보드에 두고 30초간 평소처럼 타자만 치세요(물·턱 괴기 없이). drink가 뜨면 안 됩니다."),
+    Shot("chin_rest", None, 10, "한 손으로 턱을 괸 채 10초간 가만히 화면을 보세요(손을 움직이지 말 것). drink가 뜨면 안 됩니다."),
+    Shot("look_down_keyboard", None, 14, "고개를 숙여 키보드를 10초 이상 내려다보세요(졸거나 눈 감지 말 것). deep_blink가 뜨면 안 됩니다. forward_head는 자세 신호로 뜰 수 있습니다."),
 ]
 
 

@@ -225,5 +225,5 @@ def test_length_clamp_keeps_within_bound_and_marks_replaced():
 def test_cooldown_lookup_default_for_unknown_behavior():
     """_cooldown_for falls back to the 'default' cooldown for an unknown behaviour."""
     cfg = PolicyConfig()
-    assert policy_mod._cooldown_for("forward_head", cfg) == 600.0
+    assert policy_mod._cooldown_for("forward_head", cfg) == 1200.0
     assert policy_mod._cooldown_for("totally_unknown", cfg) == cfg.nudge_cooldown_s["default"]

@@ -96,7 +96,7 @@ ul.privacy li { margin: 6px 0; }
 .countdown { font-size: 54px; font-weight: 800; color: var(--accent); min-width: 72px; }
 .progress { width: 260px; max-width: 80%; height: 8px; background: var(--panel-2); border-radius: 999px; overflow: hidden; }
 .progress > span { display: block; height: 100%; background: var(--accent); width: 0; transition: width .2s linear; }
-.discard-note { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.discard-note { color: #c3d0e2; font-size: 12px; margin-top: 4px; }
 
 /* run */
 .run-grid { display: grid; grid-template-columns: 320px 1fr; gap: 18px; align-items: start; }
@@ -189,7 +189,9 @@ table.breakdown td { color: var(--muted); }
 table.breakdown tr:last-child td { border-bottom: 0; }
 table.breakdown .empty { color: var(--muted); text-align: center; padding: 16px; }
 
-footer { color: var(--muted); font-size: 12px; text-align: center; padding: 16px; }
+/* Solid background so contrast is always resolvable (axe can't fall back to white when the
+   footer sits over the body gradient or a fixed strip's layout box) — W17 task 6. */
+footer { color: #c3d0e2; font-size: 12px; text-align: center; padding: 16px; background: var(--bg); position: relative; z-index: 1; }
 
 /* ---------- W3: accessibility, agent panel, modal, errors, responsive ---------- */
 
@@ -302,11 +304,13 @@ footer { color: var(--muted); font-size: 12px; text-align: center; padding: 16px
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .demo-corner::before { content: "●"; color: #7fd4e0; font-size: 10px; }
-/* reserve space at the bottom of the page so nothing hides under the strip */
-body.has-demo-strip { padding-bottom: 42px; }
+/* reserve space at the bottom of the page so nothing hides under the fixed strip
+   (the strip is ~30px + shadow; keep a comfortable margin so card footers like the
+   comparison card's "Example data" note are never covered — W17 task 4). */
+body.has-demo-strip { padding-bottom: 60px; }
 @media (max-width: 400px) {
   .demo-corner { font-size: 11px; padding: 6px 10px; }
-  body.has-demo-strip { padding-bottom: 38px; }
+  body.has-demo-strip { padding-bottom: 56px; }
 }
 @media (prefers-reduced-motion: no-preference) {
   .demo-corner { animation: demoPulse 2.4s ease-in-out infinite; }
@@ -409,3 +413,66 @@ body.has-demo-strip { padding-bottom: 42px; }
 .rewind-marks { display: block; width: 100%; height: 10px; border-radius: 4px; }
 .rewind-track input[type="range"] { width: 100%; margin-top: 4px; accent-color: var(--accent); cursor: pointer; }
 .rewind-time { margin: 6px 0 0; color: var(--fg); font-size: 12.5px; min-height: 1.2em; }
+
+/* ---------- W16: quiet mode + timeline report + session comparison ---------- */
+/* Quiet bar (run screen): default-on toggle + a calm status chip (no sound, no flash). */
+.quiet-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  flex-wrap: wrap; margin-bottom: 6px;
+}
+.quiet-chip {
+  background: var(--accent-soft); border: 1px solid var(--line); color: var(--fg);
+  border-radius: 999px; padding: 4px 12px; font-size: 13px; font-variant-numeric: tabular-nums;
+}
+.quiet-chip.has-notes { border-color: var(--warn); color: var(--warn); }
+.quiet-hint { color: var(--muted); font-size: 12px; margin: 0 0 12px; }
+/* merged-count tag on a toast when more of the same kind arrive while one is showing */
+.toast .more {
+  display: inline-block; margin-left: 8px; font-size: 12px; color: var(--muted);
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px;
+}
+
+/* timeline / history cards */
+.tl-hint { color: var(--muted); font-size: 12.5px; margin: 0 0 8px; }
+.tl-card {
+  position: relative; background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 12px; padding: 14px;
+}
+.tl-tabs { display: inline-flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.tl-tab {
+  background: transparent; border: 1px solid var(--line); color: var(--muted);
+  border-radius: 999px; padding: 5px 12px; font-size: 13px; cursor: pointer;
+}
+.tl-tab[aria-selected="true"] { color: var(--fg); border-color: var(--accent); background: var(--accent-soft); }
+.tl-rate { color: var(--fg); font-size: 14px; font-weight: 600; margin: 0 0 10px; }
+/* bar chart: flex columns; height encodes count, label underneath. Orange = bad posture. */
+.tl-chart { display: flex; align-items: flex-end; gap: 6px; min-height: 120px; padding-top: 6px; }
+.tl-chart.history-chart { gap: 8px; }
+.tl-bar { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
+.tl-bar .bar-fill {
+  width: 100%; max-width: 34px; background: var(--warn); border-radius: 6px 6px 0 0;
+  min-height: 2px; transition: height .25s ease;
+}
+.tl-bar.is-this .bar-fill { background: var(--accent); }
+.tl-bar .bar-n { font-size: 12px; color: var(--fg); font-variant-numeric: tabular-nums; }
+.tl-bar .bar-x { font-size: 10.5px; color: var(--muted); text-align: center; overflow-wrap: anywhere; line-height: 1.2; }
+.tl-short, .history-none { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+.tl-view-toggle { margin-top: 10px; }
+.tl-table { margin-top: 10px; }
+.history-trend { color: var(--fg); font-size: 14px; font-weight: 600; margin: 0 0 10px; }
+.example-badge {
+  position: absolute; right: 12px; top: 12px;
+  background: #12303a; color: #7fd4e0; border: 1px solid #1f5a67;
+  border-radius: 999px; padding: 3px 10px; font-size: 11.5px; font-weight: 600;
+}
+.example-note { color: #7fd4e0; font-size: 12px; margin: 8px 0 0; }
+.stored-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+  margin-top: 18px; padding: 12px 14px; border: 1px dashed var(--line); border-radius: 12px;
+}
+.stored-title { font-weight: 600; font-size: 13px; }
+.stored-note { color: var(--muted); font-size: 12px; margin: 4px 0 0; max-width: 60ch; }
+@media (max-width: 400px) {
+  .tl-chart { min-height: 96px; }
+  .tl-bar .bar-fill { max-width: 26px; }
+}

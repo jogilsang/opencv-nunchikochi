@@ -102,6 +102,16 @@
     <section id="screen-run" class="screen">
       <div class="quality-banner" id="quality-banner" role="status" aria-live="polite"></div>
       <div class="temp-error" id="temp-error" data-i18n="tempError" role="status" aria-live="polite"></div>
+      <!-- Quiet mode (W16): default ON — alerts stay off, only a calm status chip shows, but
+           posture is still recorded. Turning it off opts into gentle nudge toasts. -->
+      <div class="quiet-bar" id="quiet-bar">
+        <label class="switch" for="quiet-toggle">
+          <input type="checkbox" id="quiet-toggle" checked />
+          <span data-i18n="quietLabel"></span>
+        </label>
+        <span class="quiet-chip" id="quiet-chip" role="status" aria-live="polite"></span>
+      </div>
+      <p class="quiet-hint" id="quiet-hint" data-i18n="quietHint"></p>
       <div class="card">
         <div class="run-grid">
           <div>
@@ -247,6 +257,53 @@
             </thead>
             <tbody></tbody>
           </table>
+        </div>
+
+        <!-- Posture record over time (W16): bad-posture count per 5/10/30/60-min slice. -->
+        <h3 class="sub" data-i18n="timelineTitle"></h3>
+        <p class="tl-hint" data-i18n="timelineHint"></p>
+        <div class="tl-card" id="report-timeline">
+          <div class="tl-tabs" role="tablist" aria-label="Time slice">
+            <button type="button" class="tl-tab" role="tab" data-unit="5m" data-i18n="tl5m"></button>
+            <button type="button" class="tl-tab" role="tab" data-unit="10m" data-i18n="tl10m"></button>
+            <button type="button" class="tl-tab" role="tab" data-unit="30m" data-i18n="tl30m"></button>
+            <button type="button" class="tl-tab" role="tab" data-unit="60m" data-i18n="tl60m"></button>
+          </div>
+          <p class="tl-rate" id="tl-rate" role="status" aria-live="polite"></p>
+          <div class="tl-chart" id="tl-chart" role="img" aria-label=""></div>
+          <p class="tl-short" id="tl-short" hidden data-i18n="timelineShort"></p>
+          <div class="tl-view-toggle">
+            <button type="button" class="chip-btn" id="tl-toggle-view" aria-pressed="false" data-i18n="timelineTable"></button>
+          </div>
+          <div class="table-wrap" id="tl-table-wrap" hidden>
+            <table class="breakdown tl-table" id="tl-table">
+              <thead>
+                <tr><th data-i18n="timelineColSlice"></th><th data-i18n="timelineColCount"></th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Compared with earlier sessions (W16): per-hour bad-posture rate across recent
+             sessions, with an observational trend (improving / same / worsening). -->
+        <h3 class="sub" data-i18n="historyTitle"></h3>
+        <p class="tl-hint" data-i18n="historyHint"></p>
+        <div class="tl-card" id="report-history">
+          <span class="example-badge" id="history-example" hidden data-i18n="historyExample"></span>
+          <p class="history-trend" id="history-trend" role="status" aria-live="polite"></p>
+          <div class="tl-chart history-chart" id="history-chart" role="img" aria-label=""></div>
+          <p class="history-none" id="history-none" hidden data-i18n="historyNone"></p>
+          <p class="example-note" id="history-example-note" hidden data-i18n="historyExampleNote"></p>
+        </div>
+
+        <!-- Numbers saved on this device (W16): hourly rate history only (no frames/landmarks). -->
+        <div class="stored-row" id="report-stored" hidden>
+          <div>
+            <span class="stored-title" data-i18n="storedTitle"></span>
+            <p class="stored-note" data-i18n="storedNote"></p>
+          </div>
+          <button type="button" class="btn ghost" id="btn-clear-stored" data-i18n="storedClear"></button>
         </div>
 
         <!-- Posture buddy rewind on the report (W10): replay this session from the

@@ -49,7 +49,66 @@ const state = {
   poseTrack: [],         // in-memory pose ring buffer for session rewind (W10 stage ②)
   demoProgressTimer: null, // realtime demo progress ticker (W13 defect 4)
   drinkUntil: 0,         // performance.now() until which the measured drink gesture is active (W14)
+  quiet: true,           // W16: quiet mode on by default — alerts off, posture still recorded
+  quietNotes: 0,         // count of nudges held back while quiet (shown on the status chip)
+  nudgeCooldownUntil: {}, // W16: per-kind cooldown so the same alert can't re-fire rapidly
+  lastToastKind: "",     // kind of the toast currently showing (for same-kind merge "+N more")
 };
+
+// W16 alert calming: keep at most ONE alert toast on screen; a new alert of the same kind
+// while one is showing is merged as "+N more" instead of stacking. Per-kind cooldown stops a
+// behaviour from re-nudging for a while (demo-scaled; the real cadence lives in the agent tab).
+const NUDGE_COOLDOWN_MS = 8000;      // demo-scale; agent policy enforces the real 20-min cadence
+const SAME_KIND_MERGE = true;
+
+// W16 browser storage: ONLY numeric hourly bad-posture rates (no frames, no landmarks, no
+// personal info), so a reload still shows the trend. Anonymous: keyed to a random browser id,
+// never a login. The user can clear it from the report.
+const STORE_KEY = "nunchi.rateHistory.v1";
+const STORE_MAX = 20;
+function loadRateHistory() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    // keep only {date, per_hour_rate} number pairs — defensive against old/odd shapes
+    return arr.filter((x) => x && typeof x.per_hour_rate === "number").slice(-STORE_MAX);
+  } catch { return []; }
+}
+function saveRateEntry(date, rate) {
+  if (typeof rate !== "number") return;
+  try {
+    const arr = loadRateHistory();
+    arr.push({ date: date || new Date().toISOString().slice(0, 10), per_hour_rate: rate });
+    localStorage.setItem(STORE_KEY, JSON.stringify(arr.slice(-STORE_MAX)));
+  } catch { /* storage may be unavailable (private mode) — trend just won't persist */ }
+}
+function clearRateHistory() { try { localStorage.removeItem(STORE_KEY); } catch {} }
+
+// W17 anonymous browser id: numbers-only continuity without login or PII. A random token in
+// localStorage links this browser's daily summaries server-side (sent as X-Anon-Id). We never
+// store frames or keys. Clearing wipes the id AND the local rate numbers, and issues a new id.
+const ANON_KEY = "nunchi.anonId.v1";
+function getAnonId() {
+  try {
+    let id = localStorage.getItem(ANON_KEY);
+    if (!id || !/^[0-9a-f]{32}$/.test(id)) { id = randomHex16(); localStorage.setItem(ANON_KEY, id); }
+    return id;
+  } catch {
+    // storage unavailable (private mode): a per-tab ephemeral id still lets the server link
+    // requests within this session, and nothing persists.
+    if (!state._ephemeralAnon) state._ephemeralAnon = randomHex16();
+    return state._ephemeralAnon;
+  }
+}
+function randomHex16() {
+  const a = new Uint8Array(16);
+  (globalThis.crypto || {}).getRandomValues ? crypto.getRandomValues(a) : a.forEach((_, i) => (a[i] = Math.floor(Math.random() * 256)));
+  return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+function clearAnonId() { try { localStorage.removeItem(ANON_KEY); } catch {} state._ephemeralAnon = null; }
+function clearAllLocalData() { clearRateHistory(); clearAnonId(); }
 
 // Pose rewind ring buffer: browser memory only. Never saved, sent, URL'd, or localStorage'd.
 const POSE_TRACK_MAX = 3600;   // ~30 min at 2/s (fixture is ~0.5s; cap bounds memory regardless)
@@ -189,7 +248,7 @@ async function checkService() {
   }
   setLiveStatus(statusEl, "", t("liveStatusChecking"), null);
   try {
-    const probe = new Api({ apiBase: state.cfg.apiBase, apiKey: liveKey || state.cfg.apiKey });
+    const probe = new Api({ apiBase: state.cfg.apiBase, apiKey: liveKey || state.cfg.apiKey, anonId: getAnonId() });
     const h = await probe.health(); // {ok, cv_version, backend, arch, build}
     const bits = [];
     if (h && h.arch) bits.push(h.arch);                       // e.g. arm64 (AWS Graviton)
@@ -297,7 +356,7 @@ async function beginSession({ forceMock = false, live = false } = {}) {
   hideDemoStrip();
   state.api = useMock
     ? new MockApi()
-    : new Api({ apiBase: state.cfg.apiBase, apiKey: liveKey || state.cfg.apiKey });
+    : new Api({ apiBase: state.cfg.apiBase, apiKey: liveKey || state.cfg.apiKey, anonId: getAnonId() });
   state.capture = new Capture({ fps: state.cfg.fps, mock: useMock });
   state.recentEvents = [];
   state.lastNudgeAt = 0;
@@ -572,6 +631,7 @@ function startRun() {
   clearOverlay(document.getElementById("run-overlay"));
   initOverlayToggle();
   initAgentPanel();
+  initQuietMode();
   renderAgentLog();
   state.poseTrack = [];
   state.usingRealPose = false;
@@ -644,6 +704,39 @@ function initDemoRunControls() {
 }
 function stopDemoProgress() {
   if (state.demoProgressTimer) { clearInterval(state.demoProgressTimer); state.demoProgressTimer = null; }
+}
+
+// ---------- quiet mode (W16) ----------
+// Default ON: no toasts — just a calm status chip + the recorded count. Posture keeps being
+// recorded either way (agent panel + report are unaffected). Turning it off opts into gentle
+// nudge toasts. No sound and no flashing in either mode.
+function initQuietMode() {
+  const toggle = document.getElementById("quiet-toggle");
+  const chip = document.getElementById("quiet-chip");
+  if (!toggle || !chip) return;
+  state.quietNotes = 0;
+  toggle.checked = state.quiet;
+  const apply = () => {
+    state.quiet = toggle.checked;
+    if (state.quiet) clearToasts(); // leaving loud→quiet removes any standing toasts
+    updateQuietChip();
+  };
+  toggle.onchange = apply;
+  updateQuietChip();
+}
+
+function updateQuietChip() {
+  const chip = document.getElementById("quiet-chip");
+  if (!chip) return;
+  chip.hidden = !state.quiet;
+  if (!state.quiet) { chip.textContent = ""; return; }
+  if (state.quietNotes > 0) {
+    chip.textContent = fmtTpl(t("quietChipNudge"), { n: state.quietNotes });
+    chip.classList.add("has-notes");
+  } else {
+    chip.textContent = t("quietChipWatching");
+    chip.classList.remove("has-notes");
+  }
 }
 
 function initOverlayToggle() {
@@ -869,24 +962,54 @@ function renderEvents(events) {
 // ---------- decision: nudge / confirmation ----------
 function handleDecision(d) {
   if (d.action === "ask_confirmation") {
+    // Human-in-the-loop question always needs an answer — even in quiet mode. It still
+    // never stacks (state.confirmOpen guards a single prompt).
     showConfirm(d);
-  } else if (d.action === "nudge") {
-    showNudge(d);
-  } else if (d.action === "request_recalibration") {
-    // surface as a gentle nudge in the demo (full re-calibrate loop is agent/cloud territory)
-    showNudge(d);
+  } else if (d.action === "nudge" || d.action === "request_recalibration") {
+    // W16: a nudge is a soft alert. In quiet mode we don't toast — we just count it for the
+    // status chip and the report. Otherwise, a per-kind cooldown + single-toast merge keeps
+    // alerts from piling up or re-firing rapidly.
+    const kind = d.action === "request_recalibration" ? "recalibration" : (d.reason || "nudge");
+    if (state.quiet) {
+      state.quietNotes += 1;
+      updateQuietChip();
+      return;
+    }
+    const now = performance.now();
+    const until = state.nudgeCooldownUntil[kind] || 0;
+    if (now < until) {
+      // same behaviour still in cooldown: merge into the showing toast as "+N more"
+      if (SAME_KIND_MERGE) bumpToastMore(kind);
+      return;
+    }
+    state.nudgeCooldownUntil[kind] = now + NUDGE_COOLDOWN_MS;
+    showNudge(d, kind);
   }
 }
+
+// Add/increment a "+N more" tag on the currently showing nudge toast of this kind, so repeated
+// same-kind alerts during cooldown don't stack as separate toasts (W16 calming).
+function bumpToastMore(kind) {
+  const host = document.getElementById("toast-host");
+  if (!host) return;
+  const toast = host.querySelector(`.toast[data-kind="${cssEscape(kind)}"]:not(.confirm)`)
+    || host.querySelector(".toast:not(.confirm)");
+  if (!toast) return;
+  const n = (Number(toast.dataset.more) || 0) + 1;
+  toast.dataset.more = String(n);
+  let tag = toast.querySelector(".more");
+  if (!tag) { tag = document.createElement("span"); tag.className = "more"; toast.querySelector(".msg")?.appendChild(tag); }
+  tag.textContent = " " + fmtTpl(t("toastMore"), { n });
+}
+function cssEscape(s) { return String(s).replace(/["\\]/g, "\\$&"); }
 
 function msgFor(d) {
   return getLang() === "ko" && d.message_ko ? d.message_ko : (d.message || "");
 }
 
-function showNudge(d) {
-  const now = performance.now();
-  if (now - state.lastNudgeAt < 1500) return; // avoid stacking in demo
-  state.lastNudgeAt = now;
+function showNudge(d, kind = "nudge") {
   const toast = toastEl(msgFor(d), false);
+  toast.dataset.kind = kind;
   toast.setAttribute("role", "status");
   const row = document.createElement("div");
   row.className = "btn-row";
@@ -927,7 +1050,11 @@ function showConfirm(d) {
   yes.focus();
 }
 
-const MAX_TOASTS = 2; // keep at most 2 total so nudges never bury the live metric cards (W5 ①)
+// W16: the alert queue is limited to a single nudge toast — a new nudge evicts any older
+// nudge rather than stacking (same-kind repeats merge as "+N more" before reaching here).
+// A human-in-the-loop confirm is a separate prompt (guarded by state.confirmOpen) and is
+// never silently removed by this cap.
+const MAX_NUDGE_TOASTS = 1;
 function toastEl(message, isConfirm) {
   const host = document.getElementById("toast-host");
   const toast = document.createElement("div");
@@ -937,13 +1064,16 @@ function toastEl(message, isConfirm) {
   p.textContent = message;
   toast.appendChild(p);
   host.appendChild(toast);
-  // Cap the stack to MAX_TOASTS. Evict the oldest *dismissible* toasts first so a
-  // human-in-the-loop confirm prompt is never silently removed; only fall back to
-  // removing the oldest overall if every remaining toast is a confirm.
-  while (host.children.length > MAX_TOASTS) {
-    const victim = host.querySelector(".toast:not(.confirm)") || host.firstElementChild;
-    if (!victim || victim === toast) break;
-    victim.remove();
+  // Cap the number of *nudge* (non-confirm) toasts. Evict the oldest nudges first; a confirm
+  // prompt is left alone so a question to the user is never dropped.
+  if (!isConfirm) {
+    let nudges = host.querySelectorAll(".toast:not(.confirm)");
+    while (nudges.length > MAX_NUDGE_TOASTS) {
+      const victim = nudges[0];
+      if (!victim || victim === toast) break;
+      victim.remove();
+      nudges = host.querySelectorAll(".toast:not(.confirm)");
+    }
   }
   return toast;
 }
@@ -970,16 +1100,20 @@ async function endSession() {
     // Build a minimal recoverable report so the demo never dead-ends.
     data = { summary: { duration_s: (performance.now() - state.startTime) / 1000, nudges_sent: 0, nudges_suppressed: 0, confirmations_asked: 0, counts: {} }, report: { text_en: "", text_ko: "" } };
   }
-  // comparison needs today's + yesterday's summary (GET /v1/summary). Non-fatal.
-  let previous = null;
+  // comparison needs today's + recent summaries (GET /v1/summary). Non-fatal.
+  // Real contract: /end carries report.trend; GET /v1/summary carries history (oldest-first).
+  let previous = null, history = null, example = false;
+  const trend = (data.report && data.report.trend) || null;
   try {
     const date = (data.summary && data.summary.date) || new Date().toISOString().slice(0, 10);
     const sum = await state.api.getSummary(date);
     if (sum && sum.previous) previous = sum.previous;
+    if (sum && Array.isArray(sum.history)) history = sum.history;
+    example = !!(sum && sum.example);
   } catch { /* comparison is optional */ }
   state.capture.stop();
   clearToasts();
-  state.lastReport = { summary: data.summary || {}, report: data.report || {}, previous };
+  state.lastReport = { summary: data.summary || {}, report: data.report || {}, previous, history, trend, example };
   renderReport(state.lastReport);
   show("screen-report");
 }
@@ -1010,7 +1144,7 @@ async function initReportBuddy() {
   }
 }
 
-function renderReport({ summary: s, report: rep, previous }) {
+function renderReport({ summary: s, report: rep, previous, history, trend, example }) {
   s = s || {};
   rep = rep || {};
   // number cards
@@ -1050,6 +1184,15 @@ function renderReport({ summary: s, report: rep, previous }) {
 
   // behaviour breakdown table
   renderBreakdown(s);
+
+  // W16: posture record timeline (bad-posture per 5/10/30/60-min slice)
+  renderTimeline(s.timeline, s.duration_s);
+  // W16/W17: persist this session's hourly rate once per report (real mode only; demo is
+  // sample data and must not touch storage), then render the earlier-session comparison using
+  // the server-provided trend (report.trend) and history (oldest-first).
+  const thisRate = s.timeline && s.timeline.per_hour_rate;
+  if (!example && typeof thisRate === "number") saveRateEntry(s.date, thisRate);
+  renderHistory({ summary: s, history, trend, example });
 
   // posture buddy rewind replay (W10 stage 2) — built from the in-memory pose track
   initReportBuddy();
@@ -1142,6 +1285,255 @@ function fmtSeconds(sec) {
   if (sec >= 60) return `${Math.round(sec / 60)} ${t("min")}`;
   return `${sec} ${t("sec")}`;
 }
+
+// ---------- W16: posture-record timeline ----------
+// Bad-posture counts per 5/10/30/60-min slice (provisional A11 contract). Tabs switch the
+// slice; a bar chart (orange = bad posture) shows per-slice counts with an accessible alt
+// text + a "show as table" fallback. Short sessions show a gentle "not enough data" note.
+const TL_UNITS = [
+  { key: "5m", label: "tl5m" }, { key: "10m", label: "tl10m" },
+  { key: "30m", label: "tl30m" }, { key: "60m", label: "tl60m" },
+];
+function renderTimeline(timeline, durationS) {
+  const card = document.getElementById("report-timeline");
+  if (!card) return;
+  const bad = (timeline && timeline.bad_posture) || {};
+  const rate = timeline && timeline.per_hour_rate;
+  const rateEl = document.getElementById("tl-rate");
+  // Total bad-posture events this session (sum the finest slice we have, 5m).
+  const totalEvents = (Array.isArray(bad["5m"]) ? bad["5m"] : [])
+    .reduce((a, s) => a + (s && s.events || 0), 0);
+  const mins = Math.max(0, Math.round((durationS || 0) / 60));
+  if (rateEl) {
+    if (typeof rate === "number") {
+      rateEl.textContent = fmtTpl(t("timelineRate"), { n: rate });
+    } else if (totalEvents > 0) {
+      // W19: hourly rate withheld under 10 min (not statistically meaningful) but the raw
+      // count IS shown so a short, hands-on session never looks empty.
+      rateEl.textContent = fmtTpl(t("timelineShortCount"), { min: mins, events: totalEvents });
+    } else {
+      rateEl.textContent = t("timelineNoEvents");
+    }
+  }
+
+  const tabs = Array.from(card.querySelectorAll(".tl-tab"));
+  let unit = card.dataset.unit || "5m";
+  if (!bad[unit]) unit = TL_UNITS.find((u) => bad[u.key])?.key || "5m";
+
+  const draw = () => {
+    card.dataset.unit = unit;
+    for (const b of tabs) b.setAttribute("aria-selected", String(b.dataset.unit === unit));
+    const slices = Array.isArray(bad[unit]) ? bad[unit] : [];
+    drawTimelineChart(unit, slices);
+    drawTimelineTable(unit, slices);
+  };
+  for (const b of tabs) b.onclick = () => { unit = b.dataset.unit; draw(); };
+
+  // table toggle
+  const tgl = document.getElementById("tl-toggle-view");
+  const tableWrap = document.getElementById("tl-table-wrap");
+  const chart = document.getElementById("tl-chart");
+  if (tgl && tableWrap && chart) {
+    const setTableShown = (show) => {
+      tableWrap.hidden = !show;
+      chart.hidden = show;
+      tgl.setAttribute("aria-pressed", String(show));
+      tgl.textContent = show ? t("timelineChart") : t("timelineTable");
+    };
+    setTableShown(false);
+    tgl.onclick = () => setTableShown(tableWrap.hidden);
+  }
+  draw();
+}
+
+function sliceLabel(unit, i) {
+  const stepMin = { "5m": 5, "10m": 10, "30m": 30, "60m": 60 }[unit] || 5;
+  const from = i * stepMin, to = (i + 1) * stepMin;
+  return fmtTpl(t("timelineSliceLabel"), { from, to });
+}
+
+function drawTimelineChart(unit, slices) {
+  const chart = document.getElementById("tl-chart");
+  const short = document.getElementById("tl-short");
+  if (!chart) return;
+  chart.innerHTML = "";
+  // No bars to draw (single slice with zero events). Collapse the empty bar area; the summary
+  // line above already states "No bad posture detected this session" (W19), so the extra
+  // "not enough data" note would be redundant — keep it hidden.
+  const totalEvents = slices.reduce((a, b) => a + (b.events || 0), 0);
+  if (slices.length <= 1 && totalEvents === 0) {
+    if (short) short.hidden = true;
+    chart.setAttribute("aria-label", t("timelineNoEvents"));
+    chart.hidden = true;
+    return;
+  }
+  if (short) short.hidden = true;
+  chart.hidden = false;
+  const max = Math.max(1, ...slices.map((s) => s.events || 0));
+  const unitLabel = t(TL_UNITS.find((u) => u.key === unit)?.label || "tl5m");
+  const altParts = [fmtTpl(t("timelineAltIntro"), { unit: unitLabel })];
+  for (let i = 0; i < slices.length; i++) {
+    const n = slices[i].events || 0;
+    const label = sliceLabel(unit, i);
+    const col = document.createElement("div");
+    col.className = "tl-bar";
+    const fill = document.createElement("div");
+    fill.className = "bar-fill";
+    fill.style.height = `${Math.round((n / max) * 96) + 2}px`;
+    const num = document.createElement("div"); num.className = "bar-n"; num.textContent = String(n);
+    const xlab = document.createElement("div"); xlab.className = "bar-x"; xlab.textContent = label;
+    col.append(num, fill, xlab);
+    col.setAttribute("aria-hidden", "true"); // the chart's aria-label carries the full reading
+    chart.appendChild(col);
+    altParts.push(fmtTpl(t("timelineBarAria"), { label, n }));
+  }
+  chart.setAttribute("aria-label", altParts.join(" "));
+}
+
+function drawTimelineTable(unit, slices) {
+  const tbody = document.querySelector("#tl-table tbody");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  for (let i = 0; i < slices.length; i++) {
+    const tr = document.createElement("tr");
+    const td1 = document.createElement("td"); td1.textContent = sliceLabel(unit, i);
+    const td2 = document.createElement("td"); td2.textContent = String(slices[i].events || 0);
+    tr.append(td1, td2);
+    tbody.appendChild(tr);
+  }
+}
+
+// ---------- W16/W17: compared-with-earlier-sessions ----------
+// Shows the per-hour bad-posture rate across recent sessions as a small bar chart, with the
+// server's observational trend sentence (report.trend.line_en/ko). `history` is the real
+// GET /v1/summary history (oldest-first, each carrying timeline.per_hour_rate + date). In real
+// mode the server is the source of truth; local stored numbers are only a fallback when the
+// server returns no history. In demo mode we show the sample history under an "Example data"
+// label (never passed off as real) and never touch localStorage.
+function renderHistory({ summary, history, trend, example }) {
+  const card = document.getElementById("report-history");
+  const chart = document.getElementById("history-chart");
+  const trendEl = document.getElementById("history-trend");
+  const noneEl = document.getElementById("history-none");
+  const badge = document.getElementById("history-example");
+  const exNote = document.getElementById("history-example-note");
+  const storedRow = document.getElementById("report-stored");
+  if (!card || !chart) return;
+
+  const thisRate = summary && summary.timeline && summary.timeline.per_hour_rate;
+  const rateOf = (h) => (h && h.timeline && typeof h.timeline.per_hour_rate === "number") ? h.timeline.per_hour_rate : (typeof h?.per_hour_rate === "number" ? h.per_hour_rate : null);
+  const isExample = !!example;
+
+  // earlier sessions (oldest-first). Server history wins; otherwise fall back to local stored
+  // numbers (real mode only — demo must not read/write storage).
+  let earlier = Array.isArray(history) ? history.map((h) => ({ date: h.date, rate: rateOf(h) })).filter((h) => h.rate != null) : [];
+  let usingLocalFallback = false;
+  if (!isExample && earlier.length === 0) {
+    const stored = loadRateHistory();
+    // the last stored entry is this session (just saved) — earlier = all but the last
+    earlier = stored.slice(0, -1).map((h) => ({ date: h.date, rate: h.per_hour_rate }));
+    usingLocalFallback = earlier.length > 0;
+  }
+  // newest bar = this session
+  const series = earlier.slice(-4).map((h) => ({ date: h.date, rate: h.rate, isThis: false }));
+  if (typeof thisRate === "number") series.push({ date: summary.date, rate: thisRate, isThis: true });
+
+  if (badge) badge.hidden = !isExample;
+  if (exNote) exNote.hidden = !isExample;
+  // stored-numbers row + clear button (real mode only, when something is actually stored)
+  if (storedRow) {
+    const hasStored = !isExample && loadRateHistory().length > 0;
+    storedRow.hidden = !hasStored;
+    const clearBtn = document.getElementById("btn-clear-stored");
+    if (clearBtn) clearBtn.onclick = () => {
+      clearAllLocalData(); // wipe stored numbers AND the anon id (a fresh id is issued on next request)
+      clearBtn.textContent = t("storedCleared");
+      setTimeout(() => (clearBtn.textContent = t("storedClear")), 1500);
+      renderHistory({ summary, history, trend, example }); // re-render with nothing stored
+    };
+  }
+
+  // Bars we can actually draw (any series point that has a numeric rate). This session is a
+  // bar only when its rate is known (>=10 min); a short session contributes no bar and we must
+  // not fabricate a value for it (W19).
+  const rated = series.filter((p) => typeof p.rate === "number");
+  const earlierRated = rated.filter((p) => !p.isThis);
+  const thisKnown = typeof thisRate === "number";
+
+  // Nothing to show at all → first-record guidance (no earlier rates on record).
+  if (earlierRated.length === 0 && !thisKnown) {
+    chart.innerHTML = "";
+    chart.hidden = true;
+    chart.setAttribute("aria-label", t("historyNone"));
+    if (noneEl) { noneEl.hidden = false; noneEl.textContent = t("historyNone"); }
+    if (trendEl) trendEl.textContent = (trend && (trend.line_en || trend.line_ko)) ? trendLine(trend) : "";
+    return;
+  }
+  // A single known point (only this session, no earlier) also can't form a trend yet.
+  if (rated.length < 2 && thisKnown && earlierRated.length === 0) {
+    chart.innerHTML = "";
+    chart.hidden = true;
+    chart.setAttribute("aria-label", t("historyNone"));
+    if (noneEl) { noneEl.hidden = false; noneEl.textContent = t("historyNone"); }
+    if (trendEl) trendEl.textContent = (trend && (trend.line_en || trend.line_ko)) ? trendLine(trend) : "";
+    return;
+  }
+  if (noneEl) noneEl.hidden = true;
+  chart.hidden = false;
+
+  // trend sentence:
+  // - this session too short (rate null) but earlier records exist → say so, show earlier bars.
+  // - otherwise prefer the server's ready-made localized line, else derive from direction.
+  if (trendEl) {
+    if (!thisKnown && earlierRated.length >= 1) {
+      trendEl.textContent = t("historyShortThis");
+    } else if (trend && (trend.line_en || trend.line_ko)) {
+      trendEl.textContent = trendLine(trend);
+    } else {
+      trendEl.textContent = t(`trend${cap((trend && trend.direction) || localTrend(rated.map((p) => p.rate)))}`) || "";
+    }
+  }
+
+  // bar chart
+  chart.innerHTML = "";
+  const max = Math.max(1, ...rated.map((p) => p.rate));
+  const altParts = [];
+  for (const p of series) {
+    const n = typeof p.rate === "number" ? p.rate : 0;
+    const col = document.createElement("div");
+    col.className = "tl-bar" + (p.isThis ? " is-this" : "");
+    const fill = document.createElement("div"); fill.className = "bar-fill";
+    fill.style.height = `${Math.round((n / max) * 96) + 2}px`;
+    const num = document.createElement("div"); num.className = "bar-n"; num.textContent = String(n);
+    const xlab = document.createElement("div"); xlab.className = "bar-x";
+    xlab.textContent = p.isThis ? t("historyThis") : shortDate(p.date);
+    col.append(num, fill, xlab);
+    col.setAttribute("aria-hidden", "true");
+    chart.appendChild(col);
+    altParts.push(fmtTpl(t("historyBarAria"), { date: p.isThis ? t("historyThis") : shortDate(p.date), n }));
+  }
+  const lead = (trendEl && trendEl.textContent) ? trendEl.textContent + " " : "";
+  chart.setAttribute("aria-label", lead + altParts.join(" "));
+}
+
+// Server trend carries ready EN/KO sentences; pick the active language.
+function trendLine(trend) {
+  if (!trend) return "";
+  return getLang() === "ko" ? (trend.line_ko || trend.line_en || "") : (trend.line_en || trend.line_ko || "");
+}
+
+function localTrend(rates) {
+  if (rates.length < 2) return "same";
+  const latest = rates[rates.length - 1];
+  const earlier = rates.slice(0, -1);
+  const mean = earlier.reduce((a, b) => a + b, 0) / earlier.length;
+  const rel = mean ? (latest - mean) / mean : 0;
+  if (rel <= -0.1) return "improving";
+  if (rel >= 0.1) return "worsening";
+  return "same";
+}
+function cap(s) { return String(s || "").charAt(0).toUpperCase() + String(s || "").slice(1); }
+function shortDate(d) { const s = String(d || ""); return s.length >= 10 ? s.slice(5) : s; }
 
 async function downloadShareCard(s, highlights) {
   const btn = document.getElementById("btn-download");
@@ -1316,5 +1708,30 @@ function initLang() {
     rewindState: () => (state.reportBuddy ? describePose(state.reportBuddy._lastPose, t) : ""),
     setBuddyPose: (p) => { if (state.buddy) { state.usingRealPose = true; stopBuddyFixtureFeed(); state.buddy.setPose(p); recordPose(p); const u = document.getElementById("buddy-unsure"); if (u) u.hidden = !(p && p.conf != null && p.conf < 0.5); } },
     buddySetView: (az, el) => { if (state.buddy) state.buddy.setView(az, el); },
+    // W16 test hooks: quiet mode + alert queue + report cards (numbers/labels only).
+    isQuiet: () => state.quiet,
+    quietNotes: () => state.quietNotes,
+    setQuiet: (on) => { const el = document.getElementById("quiet-toggle"); if (el) { el.checked = !!on; el.dispatchEvent(new Event("change")); } },
+    toastCount: () => document.querySelectorAll("#toast-host .toast").length,
+    nudgeToastCount: () => document.querySelectorAll("#toast-host .toast:not(.confirm)").length,
+    feedDecision: (d, tSec = 0) => { recordAgentDecision(d, tSec); if (d && d.action && d.action !== "none") handleDecision(d); },
+    timelineUnit: () => document.getElementById("report-timeline")?.dataset.unit || "",
+    setTimelineUnit: (u) => { const b = document.querySelector(`.tl-tab[data-unit="${u}"]`); if (b) b.click(); },
+    timelineBarCount: () => document.querySelectorAll("#tl-chart .tl-bar").length,
+    historyTrend: () => (document.getElementById("history-trend")?.textContent || "").trim(),
+    historyExampleShown: () => !document.getElementById("history-example")?.hidden,
+    storedRateCount: () => loadRateHistory().length,
+    clearStored: () => clearAllLocalData(),
+    // W17 anon-id hooks: report the id + whether the live Api will send X-Anon-Id (value only,
+    // never a frame/key). Used by e2e to prove the header is sent and clearing re-issues an id.
+    anonId: () => { try { return localStorage.getItem(ANON_KEY) || ""; } catch { return state._ephemeralAnon || ""; } },
+    apiAnonId: () => (state.api && state.api.anonId) || "",
+    ensureAnonId: () => getAnonId(),
+    // W19 test hook: render the report screen from a crafted payload (short session / events-0
+    // / earlier-only). Lets e2e exercise the short-session paths without a real 10-min session.
+    renderReportWith: (data) => { show("screen-report"); state.lastReport = data; renderReport(data); },
+    timelineRate: () => (document.getElementById("tl-rate")?.textContent || "").trim(),
+    historyBarCount: () => document.querySelectorAll("#history-chart .tl-bar").length,
+    historyNoneShown: () => !document.getElementById("history-none")?.hidden,
   };
 })();

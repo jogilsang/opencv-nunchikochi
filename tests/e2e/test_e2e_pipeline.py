@@ -25,6 +25,7 @@ DECISION_KEYS = {
 SUMMARY_KEYS = {
     "session_id", "date", "duration_s", "counts", "seconds", "longest_s",
     "nudges_sent", "nudges_suppressed", "confirmations_asked", "recalibrations",
+    "timeline",  # A11/C14: numbers-only per-window bad-posture record
 }
 
 

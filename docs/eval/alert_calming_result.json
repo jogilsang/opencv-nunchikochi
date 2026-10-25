@@ -1,0 +1,308 @@
+{
+  "scenario": {
+    "kind": "synthetic (NOT a real-use measurement)",
+    "duration_s": 3600.0,
+    "frame_interval_s": 30.0,
+    "frames": 121,
+    "seed": "none (fixed deterministic schedule)",
+    "source": "eval/agent/alert_calming.py::_frames",
+    "mix": "constant forward_head lean; alternating head_tilt 600-s blocks; low-confidence yawn/drink every 300 s; face-present marginal quality 1200-1265s"
+  },
+  "before": {
+    "nudges_sent": 6,
+    "confirms_asked": 1,
+    "quality_warnings": 2,
+    "suppress_decisions": 106,
+    "silent_frames": 6,
+    "suppressed_digest": {
+      "cooldown:forward_head": 106
+    },
+    "nudge_ts": [
+      180.0,
+      780.0,
+      1380.0,
+      1980.0,
+      2580.0,
+      3180.0
+    ],
+    "confirm_ts": [
+      1260.0
+    ],
+    "quality_warn_ts": [
+      1200.0,
+      1230.0
+    ],
+    "total_alerts": 9,
+    "timeline": {
+      "bad_posture": {
+        "5m": [
+          {
+            "start_s": 0.0,
+            "events": 1,
+            "seconds": 300.0
+          },
+          {
+            "start_s": 300.0,
+            "events": 0,
+            "seconds": 300.0
+          },
+          {
+            "start_s": 600.0,
+            "events": 1,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 900.0,
+            "events": 0,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 1200.0,
+            "events": 0,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 1500.0,
+            "events": 0,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 1800.0,
+            "events": 0,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 2100.0,
+            "events": 0,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 2400.0,
+            "events": 0,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 2700.0,
+            "events": 0,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 3000.0,
+            "events": 0,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 3300.0,
+            "events": 0,
+            "seconds": 600.0
+          }
+        ],
+        "10m": [
+          {
+            "start_s": 0.0,
+            "events": 1,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 600.0,
+            "events": 1,
+            "seconds": 1200.0
+          },
+          {
+            "start_s": 1200.0,
+            "events": 0,
+            "seconds": 1200.0
+          },
+          {
+            "start_s": 1800.0,
+            "events": 0,
+            "seconds": 1200.0
+          },
+          {
+            "start_s": 2400.0,
+            "events": 0,
+            "seconds": 1200.0
+          },
+          {
+            "start_s": 3000.0,
+            "events": 0,
+            "seconds": 1200.0
+          }
+        ],
+        "30m": [
+          {
+            "start_s": 0.0,
+            "events": 2,
+            "seconds": 3000.0
+          },
+          {
+            "start_s": 1800.0,
+            "events": 0,
+            "seconds": 3600.0
+          }
+        ],
+        "60m": [
+          {
+            "start_s": 0.0,
+            "events": 2,
+            "seconds": 6600.0
+          }
+        ]
+      },
+      "per_hour_rate": 2.0
+    }
+  },
+  "after": {
+    "nudges_sent": 3,
+    "confirms_asked": 1,
+    "quality_warnings": 1,
+    "suppress_decisions": 109,
+    "silent_frames": 7,
+    "suppressed_digest": {
+      "cooldown:forward_head": 75,
+      "quality_transient": 1,
+      "hourly_cap:forward_head": 34
+    },
+    "nudge_ts": [
+      180.0,
+      1380.0,
+      2580.0
+    ],
+    "confirm_ts": [
+      1260.0
+    ],
+    "quality_warn_ts": [
+      1230.0
+    ],
+    "total_alerts": 5,
+    "timeline": {
+      "bad_posture": {
+        "5m": [
+          {
+            "start_s": 0.0,
+            "events": 1,
+            "seconds": 300.0
+          },
+          {
+            "start_s": 300.0,
+            "events": 0,
+            "seconds": 300.0
+          },
+          {
+            "start_s": 600.0,
+            "events": 1,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 900.0,
+            "events": 0,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 1200.0,
+            "events": 0,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 1500.0,
+            "events": 0,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 1800.0,
+            "events": 0,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 2100.0,
+            "events": 0,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 2400.0,
+            "events": 0,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 2700.0,
+            "events": 0,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 3000.0,
+            "events": 0,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 3300.0,
+            "events": 0,
+            "seconds": 600.0
+          }
+        ],
+        "10m": [
+          {
+            "start_s": 0.0,
+            "events": 1,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 600.0,
+            "events": 1,
+            "seconds": 1200.0
+          },
+          {
+            "start_s": 1200.0,
+            "events": 0,
+            "seconds": 1200.0
+          },
+          {
+            "start_s": 1800.0,
+            "events": 0,
+            "seconds": 1200.0
+          },
+          {
+            "start_s": 2400.0,
+            "events": 0,
+            "seconds": 1200.0
+          },
+          {
+            "start_s": 3000.0,
+            "events": 0,
+            "seconds": 1200.0
+          }
+        ],
+        "30m": [
+          {
+            "start_s": 0.0,
+            "events": 2,
+            "seconds": 3000.0
+          },
+          {
+            "start_s": 1800.0,
+            "events": 0,
+            "seconds": 3600.0
+          }
+        ],
+        "60m": [
+          {
+            "start_s": 0.0,
+            "events": 2,
+            "seconds": 6600.0
+          }
+        ]
+      },
+      "per_hour_rate": 2.0
+    }
+  },
+  "cost_of_calming": {
+    "first_nudge_same_s": [
+      180.0,
+      180.0
+    ],
+    "first_repeat_nudge_delayed_by_s": 600.0,
+    "held_nudges": 3,
+    "held_confirms": 0,
+    "held_quality_warnings": 1,
+    "note": "Held alerts are not lost: they are counted in suppressed_digest and surface in the end-of-session report. 'Genuinely wanted' repeats = the held nudges above, i.e. the same posture problem re-announced less often."
+  }
+}

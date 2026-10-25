@@ -1,8 +1,13 @@
 # Web e2e & accessibility — WEB_E2E.md
 
 Owner: web tab (W5). Results are recorded **as-is** (pass and fail), with the exact
-commands to reproduce. No real camera and no real server are used: the suite drives
-the app in demo (`?demo=1`) / mock (`?mock=1`) mode with a fake media-stream flag.
+commands to reproduce. No real camera and no real server are used for the main suite: it
+drives the app in demo (`?demo=1`) / mock (`?mock=1`) mode with a fake media-stream flag.
+
+**These results are from the LOCAL SOURCE in `web/`** (run on this machine), not from the
+deployed CloudFront build. Re-run after any deploy (C15) to confirm the deployed bundle
+matches. The one exception is the live-integration run (§4b, §5), which drives the real local
+FastAPI service started by `scripts/run_local.sh`.
 
 ## How to run
 
@@ -26,7 +31,12 @@ install chromium and re-run.
 
 ## 1. Browser e2e (Playwright, chromium)
 
-Command: `npm run e2e` → `web/e2e/run.mjs`. Last run: **60 / 60 passed, 0 failed.**
+Command: `npm run e2e` → `web/e2e/run.mjs`. Last run: **87 / 87 passed, 0 failed**
+(ran 3× consecutively, 0 failures). Count grew 60 → 76 (W16) → 83 (W17) → 87 (W19):
+W16 added quiet mode + the posture-record timeline + the earlier-session comparison; W17
+added the real server-field mapping (`report.trend`, `history`) + the anonymous `X-Anon-Id`
+continuity checks; W19 added the short-session posture-record cases (count shown even when the
+hourly rate is withheld).
 
 Unit tests: `npm run test:unit` → `node --test buddy-kinematics.test.mjs` — **6 / 6 passed**
 (the pure posture→rig mapping: neutral base, 1.5× exaggerate + clamp, monotonic torso lean +
@@ -59,6 +69,33 @@ cap, low-confidence hold, drink→right arm, NaN/undefined input).
 | mode + pacing (W13) | default demo shows "Skip to report" + realtime progress controls | ✅ |
 | mode + pacing (W13) | default demo stays on run screen (no ~7s auto-advance; 60–90s window) | ✅ |
 | mode + pacing (W13) | default demo "Skip to report" ends the session on demand | ✅ |
+| quiet mode (W16) | quiet mode ON by default: toggle checked + calm status chip shown | ✅ |
+| quiet mode (W16) | in quiet mode a nudge does NOT toast — it counts on the chip instead | ✅ |
+| quiet mode (W16) | turning quiet OFF then a nudge shows exactly one toast | ✅ |
+| quiet mode (W16) | same-kind nudge during cooldown merges as "+N more" (queue stays 1) | ✅ |
+| quiet mode (W16) | no uncaught page errors in the quiet-mode flow | ✅ |
+| timeline (W16) | posture-record card shows an hourly rate + a bar chart | ✅ |
+| timeline (W16) | tabs switch the slice (5m → 30m) | ✅ |
+| timeline (W16) | chart is accessible (role=img + non-empty aria-label) | ✅ |
+| timeline (W16) | table-view toggle reveals an equivalent table | ✅ |
+| comparison (W16) | demo comparison shows improving trend + "Example data" label | ✅ |
+| comparison (W16) | demo mode does NOT write rates to localStorage (sample stays sample) | ✅ |
+| comparison (W16) | no uncaught page errors in the timeline/comparison report | ✅ |
+| storage (W16) | real (mock) mode stored this session's hourly rate (numbers only) | ✅ |
+| storage (W16) | clear-stored button empties the saved numbers | ✅ |
+| storage (W16) | first record (nothing stored) shows "no earlier sessions" guidance | ✅ |
+| storage (W16) | no uncaught page errors in the storage/empty-state flow | ✅ |
+| real fields (W17) | comparison renders the server trend sentence (`report.trend.line_*`) | ✅ |
+| real fields (W17) | mock mode stored this session's rate; "Example data" label NOT shown | ✅ |
+| real fields (W17) | no uncaught page errors in the real-trend flow | ✅ |
+| anon id (W17) | live mode sends `X-Anon-Id` (32-hex) and `X-Api-Key` on the service probe | ✅ |
+| anon id (W17) | the anon id persists in localStorage (numbers-only continuity) | ✅ |
+| anon id (W17) | clearing saved numbers re-issues a NEW anon id | ✅ |
+| demo strip (W17) | demo strip does not overlap the comparison card's example note | ✅ |
+| short session (W19) | rate null + 2 events → draws a bar + a "N bad-posture moment(s)" count sentence | ✅ |
+| short session (W19) | zero-event short session → "no bad posture detected", no bars | ✅ |
+| short session (W19) | short session + earlier records → "too short to compare" + earlier bars only (today not fabricated) | ✅ |
+| short session (W19) | no uncaught page errors | ✅ |
 | posture buddy (W10) | 3D/2D init, pose track, exaggeration 1.5×, rewind scrub | ✅ (10 checks) |
 | sitting buddy (W14) | parts match the active render mode (3D figure or 2D fallback) + triangle budget ≤ 4000 when 3D | ✅ |
 | sitting buddy (W14) | honesty line shown: head+hand measured, neck+torso estimated, no legs | ✅ |
@@ -88,15 +125,15 @@ required by the brief — camera refused (`denied`), server error (`server`), ne
 ## 2. Accessibility (axe-core, WCAG 2 A/AA)
 
 Command: `node web/e2e/axe-run.mjs`. Scanned: start, privacy modal, run, run+agent-panel,
-report. **Hard (non-contrast serious/critical) violations: 0.**
+report. **Hard (non-contrast serious/critical) violations: 0. Contrast advisories: 0.**
 
 | Screen | Hard violations | Contrast advisories |
 |---|---|---|
 | start | 0 | 0 |
 | privacy-modal | 0 | 0 |
 | run | 0 | 0 |
-| run + agent panel | 0 | 1 (see note) |
-| report | 0 | 1 (see note) |
+| run + agent panel | 0 | 0 |
+| report | 0 | 0 |
 
 Notes recorded as-is:
 - The scan waits for each screen's fade-in to settle (opacity ≈ 1) before measuring.
@@ -105,12 +142,11 @@ Notes recorded as-is:
 - Position-fixed pills (`#demo-corner`, `#toast-host`) are hidden during the scan because,
   when they overlap flow text, axe cannot resolve the real background and falls back to
   white.
-- The two remaining **contrast advisories** are both the footer `<span data-i18n="discardNote">`.
-  At scan time that footer span measures as a zero-area box (the run screen pushes it off
-  the measured area), so axe falls back to a white background and reports a false ~2:1.
-  The element's real colours are `--muted #a9b8cc` on the dark panel/background, which
-  computes to **7.4:1 (panel) – 9.2:1 (page bg)** — comfortably above the AA 4.5:1 floor.
-  Verified by hand (relative-luminance contrast calc), so these are advisory, not failures.
+- The footer `<span data-i18n="discardNote">` contrast advisory seen through W14–W16 is
+  **resolved in W17**: the footer now has a solid `background: var(--bg)` (and its own
+  stacking context) so axe can always resolve the background instead of falling back to
+  white, and the text colour was brightened to `#c3d0e2`. All five screens now report 0
+  advisories as well as 0 hard violations.
 
 Manual a11y checklist (from the e2e + inspection):
 - Keyboard-only: whole demo flow reachable; `:focus-visible` outline on controls. ✅
@@ -208,6 +244,93 @@ error `2D fallback should report head2d (got head,neck,shoulders,chest,rightArm,
 axe 0 hard). The e2e count stays 60 (the standalone triangle check folded into the atomic parts
 check; a role/aria accessibility check was added).
 
+## 3d. W16 alert calming + posture-record timeline + earlier-session comparison
+
+- **Quiet mode (default ON).** The run screen opens with a *Quiet* toggle on: no toast, no
+  sound, no flashing — just a calm status chip ("Quiet · N posture note(s)"). Posture is still
+  recorded; held-back nudges are counted on the chip. Turning Quiet off opts into gentle nudge
+  toasts, and even then the alert queue is **capped to one** nudge toast; a same-kind nudge
+  during cooldown merges as "+N more" instead of stacking. A human-in-the-loop confirm prompt
+  is still shown (it needs an answer) and is never evicted by the cap.
+- **Posture record (timeline).** The report shows bad-posture counts (forward-head + head-tilt)
+  per **5 / 10 / 30 / 60-minute** slice as an orange bar chart, with an hourly-rate summary
+  line, a tab per slice, a "show as table" accessible fallback, and a "session too short" note
+  for slices with no data. Chart is `role="img"` with a full-text `aria-label` (colour is not
+  the only signal).
+- **Earlier-session comparison.** A small per-hour-rate bar chart across recent sessions with
+  an observational trend sentence (improving / same / worsening / na). Demo mode shows sample
+  sessions under an explicit **"Example data"** label and never writes to storage.
+
+## 3e. W17 real server fields + anonymous continuity + first-screen clarity
+
+- **Real contract wired.** The report now reads the deployed shape (verified against the local
+  service, §5): `/end` → `report.trend` (`direction`, `today_rate`, `baseline_rate`, `n`,
+  `line_en`, `line_ko`) and `GET /v1/summary` → `history` (most-recent ≤5, **oldest-first**,
+  each carrying `timeline.per_hour_rate`). The W16 placeholder fields (`compare.latest`,
+  `earlier_mean`, `history[].this_session`) were removed from `mock.js` / `demo.js` / `app.js`;
+  the mock + demo now return the same shape as the server, and the trend sentence shown is the
+  server's ready-made localized `line_en` / `line_ko`.
+- **Anonymous id.** Live mode sends `X-Anon-Id` (a 32-hex random token in `localStorage`, with a
+  `crypto.getRandomValues` fallback) on every request so the server links a user's daily
+  summaries without any login or PII. Server history is the source of truth; local stored
+  numbers are only a fallback when the server returns none (demo never stores). "Clear saved
+  numbers" wipes the stored numbers **and** the anon id (a new id is issued next request).
+  CORS on the service allows `X-Anon-Id` (confirmed by a real preflight, §5).
+- **First-screen clarity.** The start screen leads with a one-sentence value + what it won't do
+  ("frames … thrown away instantly, never recorded"); the **Demo (no camera, no key)** card is
+  first and labelled as the instant, keyless path.
+
+## 3f. W18 live two-session check (real local service, fake camera)
+
+Ran the full **Live** path twice in the **same browser context** against the real local
+service (`scripts/run_local.sh`, dummy key, Playwright fake camera), screenshotting the
+report's posture-record and comparison cards each time:
+`docs/screenshots/w18-live-report-{1,2}-{timeline,comparison}.png`.
+
+Recorded **as-is** (both sessions, 0 uncaught page errors, anon id persisted across both):
+
+- Each session was only ~11 s (a quick fake-camera run), so `timeline.per_hour_rate` is
+  `null` (the <10-min rule) and the posture-record card honestly shows *"Session too short to
+  estimate an hourly rate"* + *"Not enough data yet"* — no fabricated bars.
+- The comparison card on the 2nd run shows the server trend `direction: "na"` with its line
+  *"No earlier sessions to compare with yet."* **Why, confirmed against the service:**
+  `GET /v1/summary` *did* return a `history` entry for session 1 (the anon id linked them —
+  numbers only, `duration_s≈11`, `timeline` present), but that entry's `per_hour_rate` is
+  `null` (short session) and the fake camera produced 0 forward-head/head-tilt events, so there
+  is no per-hour rate to chart or compare. This is correct, honest behaviour: **history is
+  linked and returned, but a short, event-free session yields no plottable trend.** A real
+  ≥10-min session with posture events would populate both the timeline bars and the trend.
+- The live path otherwise worked end to end: Live gate → key → calibrate → run (overlay +
+  metrics from the real OpenCV backend, `stubs:false`) → End → report, with no demo
+  strip/badge (honesty) and no console errors.
+
+**W18 polish fix (1).** On a short session the posture-record card used to leave a tall empty
+bar area above the "not enough data" note; the chart box is now collapsed (`hidden`) when a
+slice has no data, so the card reads cleanly. Other minor items noted but left as-is: the live
+~11 s fake-camera run can't exercise a real trend (needs a ≥10-min session), and the comparison
+"na" copy is intentionally the server's wording.
+
+## 3g. W19 short session still shows a meaningful posture record
+
+W18's live run surfaced a real usability gap: an ~11 s session has `per_hour_rate: null` (the
+server withholds an hourly rate under 10 minutes — not statistically meaningful), so the
+posture-record card only said *"session too short"* and looked empty. W19 keeps the server's
+10-minute rule but **shows the raw count**:
+
+- **Timeline.** Even with `per_hour_rate` null, if `timeline.bad_posture` has events the bars are
+  drawn (5-min slices, as far as the session reached), and the summary line reads *"This session
+  (N min): M bad-posture moment(s). Hourly rate shows from 10 minutes."* (session length from
+  `summary.duration_s`). Zero events → *"No bad posture detected this session."* and the empty
+  chart stays collapsed. The hourly-rate wording ("About N per hour") is unchanged for ≥10-min
+  sessions.
+- **Comparison.** When this session's rate is null but the history has ≥1 session with a rate,
+  the card shows *"This session is still short to compare. Use it for 10+ minutes to compare with
+  your earlier records."* and draws **only the earlier bars** — today's value is never fabricated.
+  First-record (no earlier rates) still shows the "no earlier sessions" guidance.
+- Demo data unchanged. EN/KO copy in `i18n.js`. Covered by the "short session posture record
+  (W19)" e2e group (§1, 4 checks) and screenshots `docs/screenshots/w19-{short-count,no-events,
+  compare-tooshort,short-count-mobile}.png`; axe stays 0/0 and 390px has no horizontal scroll.
+
 ## 4. W6 live mode (Demo / Live, access key, service status)
 
 ### 4a. Start-screen mode select & key safety (self-contained e2e)
@@ -223,8 +346,9 @@ URL, or logs.
 
 Command: `node web/e2e/live.mjs` (needs a running service + static web server; use
 `scripts/run_local.sh`, or start the service any other way and pass `SVC`/`KEY`/`BASE`).
-Last run against a local `uvicorn nunchi.service.app` on `:8000` with a **Playwright fake
-camera**: **7 / 7 passed, 0 failed.**
+Last `live.mjs` run against a local `uvicorn nunchi.service.app` on `:8000` with a **Playwright
+fake camera**: **7 / 7 passed, 0 failed.** (W18 additionally ran two full live sessions through
+the report screen against `scripts/run_local.sh` — see §3f.)
 
 | Check | Result |
 |---|---|

@@ -13,7 +13,8 @@ choice (U5).
 
 | # | time | screen / asset | URL state | narration line (abridged) | caption (burned-in) |
 |---|------|----------------|-----------|---------------------------|---------------------|
-| 1 | 0:00–0:30 | [USER] talking head *or* `demo-01-start.png` under VO | n/a / demo | "We creep toward the screen and never notice until it hurts… a calm desk coach that reads posture and fatigue cues — never who you are." | Reads posture & fatigue cues — never who you are. |
+| 0 | 0:00–0:10 | [USER] real webcam, overlay ON, big (face box + landmarks + head-pose axes + confidence), head turns then leans in; no narration | live | (none) | Measured, not guessed — frames never leave a trace. |
+| 1 | 0:10–0:30 | [USER] talking head *or* `demo-01-start.png` under VO | n/a / demo | "We creep toward the screen and never notice until it hurts… a calm desk coach that reads posture and fatigue cues — never who you are." | Reads posture & fatigue cues — never who you are. |
 | 2 | 0:30–0:45 | `demo-01-start.png` (consent) | demo | "One promise up front: frames are analysed in memory on AWS and discarded immediately." | Frames analysed in memory on AWS, then discarded. |
 | 2 | 0:45–1:00 | `demo-08-privacy.png` (privacy modal) | demo | "Only aggregate numbers are kept. A wellbeing nudge, not a diagnosis." | Only aggregate numbers kept · not a diagnosis. |
 | 3 | 1:00–1:12 | `live-02-connected-ready.png` (mode select, Live, status line) | live | "Pick Live mode, allow the camera." | Live mode · running on arm64 · OpenCV 5. |
@@ -30,7 +31,8 @@ choice (U5).
 | 7 | 3:55–4:15 | [DIAGRAM] architecture (placeholder) + `demo-08-privacy.png` | n/a | "One Lambda, arm64 Graviton, concurrency cap 5; state in DynamoDB 24h; frames never stored; a frame analyses in ~0.2–0.3s, enough for 2 fps." | AWS · arm64 Graviton · ~0.2–0.3s/frame · frames never stored. |
 | 8 | 4:15–4:30 | `demo-04-run-skeleton.png` → confirm toast (failure path) | demo | "Dark room → quality warning → second look doesn't clear it → it asks you." | Failure path: unsure → ask, don't guess. |
 | 8 | 4:30–4:45 | text card over `demo-07-report.png` | n/a | "22 deterministic + 9 adversarial scenarios; one left failing on purpose." | Eval: 22/22 + 9 adversarial · 1 honest FAIL. |
-| 9 | 4:45–4:55 | `demo-07-report.png` / `demo-09-report-ko.png` [USER] close | demo | "OpenCV 5 that sees, an agent that decides with you, frames never kept." | OpenCV 5 · agent-with-you · privacy-first. |
+| 9 | 4:45–4:50 | `demo-07-report.png` / `demo-09-report-ko.png` [USER] close | demo | "OpenCV 5 that sees, an agent that decides with you, frames never kept." | OpenCV 5 · agent-with-you · privacy-first. |
+| 10 | 4:50–4:58 (last 8s) | end card: live URL (`?demo=1`) + `github.com/jogilsang/opencv-nunchikochi` (MIT), large text, no keys | n/a | (none) | Measured = measured. Estimated = labelled estimated. |
 
 ## Notes for the editor
 - Prefer motion (recorded webm from `record_demo.mjs`) for scenes 3–6; the buddy panel (scene 6)

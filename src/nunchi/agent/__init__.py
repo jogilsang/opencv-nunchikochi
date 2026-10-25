@@ -12,7 +12,7 @@ from . import guardrails, planner, policy, tools
 from .agent import NunchiAgent
 from .context import AgentContext, PolicyConfig
 from .planner import BedrockPlanner, FakeLLM, Planner, PlanRequest
-from .summary import SummaryAccumulator, compare
+from .summary import SummaryAccumulator, compare, summary_dict
 from .trace import TraceLine, TraceRecorder
 
 __all__ = [
@@ -30,5 +30,6 @@ __all__ = [
     "guardrails",
     "planner",
     "policy",
+    "summary_dict",
     "tools",
 ]

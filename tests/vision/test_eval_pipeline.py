@@ -192,6 +192,28 @@ def test_record_clips_dry_run():
     assert "away_dim" in r.stdout and "yawn_dim" in r.stdout
 
 
+def test_record_clips_includes_v13_falsepositive_and_drink_shots():
+    """V13: the record plan must include the drink shot and the negative
+    (no-event) false-positive clips — typing / chin-rest / looking down — so the
+    user can capture the exact situations that mislabelled (and the labels for the
+    negatives stay empty = 'event: none')."""
+    from eval.record_clips import SCRIPT, plan
+    suffixes = {s.clip_suffix: s for s in SCRIPT}
+    for name in ("drink", "typing", "chin_rest", "look_down_keyboard"):
+        assert name in suffixes, f"missing shot {name}"
+    # negatives carry no behaviour label (a real event here would be a false positive)
+    assert suffixes["typing"].behavior is None
+    assert suffixes["chin_rest"].behavior is None
+    assert suffixes["look_down_keyboard"].behavior is None
+    assert suffixes["drink"].behavior == "drink"
+    # typing is the 30s soak the brief asked for
+    assert suffixes["typing"].seconds >= 30
+    # the plan reflects the same (negatives -> behavior None in the emitted plan)
+    items = {it["clip"]: it for it in plan("bright")}
+    assert items["typing_bright"]["behavior"] is None
+    assert items["drink_bright"]["behavior"] == "drink"
+
+
 def test_harness_self_test(tmp_path: Path):
     """normal: harness --self-test runs the full match+report+PNG path, no model."""
     out = tmp_path / "selftest"

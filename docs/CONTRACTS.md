@@ -32,6 +32,11 @@ class NunchiAgent:
 - `AgentContext`(agent 탭 정의, JSON 직렬화 가능): 세션 시작 시각, 마지막 넛지 시각·종류, 집중 구간 여부, 사용자 설정(방해 금지 등), 최근 N초 이벤트 요약. **프레임/이미지 금지.**
 - **도구(tools)**: `get_quality`, `get_metrics_window`, `second_look`(능동 지각: 품질 불량·낮은 확신일 때 사람에게 묻기 전에 `analyze_variant`로 다시 보고, 결과가 해소되면 사람에게 묻지 않고, 아니면 묻는다), `request_recalibration`, `ask_confirmation`, `send_nudge`, `suppress`. 도구 호출·결과·결정 근거는 trace(JSONL, 필드: ts, session_id, frame_t, tool, args, result_summary, decision, evidence)로 남기고 **이미지는 남기지 않는다**.
 - 결정론 모드(Bedrock 없이 규칙)가 기본이자 테스트 기준. Strands/Bedrock 모드는 같은 도구를 쓰며 실패하면 결정론으로 폴백.
+- **CONTRACT-CHANGE (A11, agent 탭 제안 → 지휘자 수락 2026-10-25, 구현은 C14·W16)**: 알림 진정 + 시간대별 기록을 위해 두 가지를 더한다. 숫자만, 이미지 없음, 하위 호환(필드 없으면 null 취급).
+  - `PolicyConfig`(agent 탭 정의) 조용한 기본값: `nudge_cooldown_s` 기본 1200초(행동별 20분), `max_nudges_per_hour=3`(최근 3600초 롤링), `max_confirms_per_hour=2`(같은 종류 연속 금지), `quality_warn_min_sustained_s=30.0`(불량이 30초 이상 지속돼야 경고). 억제된 신호는 버리지 않고 `AgentContext.suppressed_digest`에 세어 리포트에 반영하고 trace에 사유를 남긴다.
+  - `SessionSummary`에 `timeline` 추가(제안): `{"bad_posture": {"5m":[{"start_s","events","seconds"},…], "10m":[…], "30m":[…], "60m":[…]}, "per_hour_rate": float|null}`. "나쁜 자세"=`forward_head`+`head_tilt`(deep_blink 제외). `per_hour_rate`는 세션 10분 미만이면 null. 지금은 `nunchi.agent.summary.summary_dict(summary, accumulator)`가 이 필드를 직렬화 결과에 덧붙인다(원본 `contracts.SessionSummary`는 미변경). 지휘자가 반영하면 `contracts.py`로 승격한다.
+  - 다회차 비교: `compare(today, previous, *, history=[최근 5개 요약], today_rate)` → `trend={"direction":"improving|same|worsening|na", "today_rate","baseline_rate","n","line_en","line_ko"}`. `history`는 직렬화된 요약 dict(`timeline.per_hour_rate` 보유) 또는 객체. 나쁜 자세 시간당 횟수가 낮을수록 개선.
+  - **cloud 탭 할 일**(직접 수정 안 함): ① 세션 종료 시 `summary_dict(summary, acc)`로 `timeline`을 포함해 DynamoDB `USER#<anon>`/`DAY#<date>`에 숫자만 저장. ② `GET /v1/summary`가 최근 5개(`history`)를 함께 반환해 web이 trend를 그릴 수 있게. ③ "같은 사용자" 잇기는 로그인 없이 **브라우저가 보관하는 익명 id**(localStorage의 무작위 토큰)를 `USER#<anon>`로 사용(개인 식별 정보 금지).
 
 ## 3. HTTP API (OWNER: cloud 탭, 소비: web·테스트) — 서비스 `nunchi.service`
 공통: 헤더 `X-Api-Key`(배포 시 생성), JSON 응답, CORS는 웹 오리진만, 요청 크기 ≤ 200 KB, 비율 제한.

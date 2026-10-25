@@ -1,0 +1,165 @@
+{
+  "_note": "synthetic sample for web/docs; numbers only, no images",
+  "today": {
+    "session": "today",
+    "timeline": {
+      "bad_posture": {
+        "5m": [
+          {
+            "start_s": 0.0,
+            "events": 1,
+            "seconds": 300.0
+          },
+          {
+            "start_s": 300.0,
+            "events": 0,
+            "seconds": 300.0
+          },
+          {
+            "start_s": 600.0,
+            "events": 1,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 900.0,
+            "events": 0,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 1200.0,
+            "events": 0,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 1500.0,
+            "events": 0,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 1800.0,
+            "events": 0,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 2100.0,
+            "events": 0,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 2400.0,
+            "events": 0,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 2700.0,
+            "events": 0,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 3000.0,
+            "events": 0,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 3300.0,
+            "events": 0,
+            "seconds": 600.0
+          }
+        ],
+        "10m": [
+          {
+            "start_s": 0.0,
+            "events": 1,
+            "seconds": 600.0
+          },
+          {
+            "start_s": 600.0,
+            "events": 1,
+            "seconds": 1200.0
+          },
+          {
+            "start_s": 1200.0,
+            "events": 0,
+            "seconds": 1200.0
+          },
+          {
+            "start_s": 1800.0,
+            "events": 0,
+            "seconds": 1200.0
+          },
+          {
+            "start_s": 2400.0,
+            "events": 0,
+            "seconds": 1200.0
+          },
+          {
+            "start_s": 3000.0,
+            "events": 0,
+            "seconds": 1200.0
+          }
+        ],
+        "30m": [
+          {
+            "start_s": 0.0,
+            "events": 2,
+            "seconds": 3000.0
+          },
+          {
+            "start_s": 1800.0,
+            "events": 0,
+            "seconds": 3600.0
+          }
+        ],
+        "60m": [
+          {
+            "start_s": 0.0,
+            "events": 2,
+            "seconds": 6600.0
+          }
+        ]
+      },
+      "per_hour_rate": 2.0
+    }
+  },
+  "history": [
+    {
+      "session": "s1",
+      "timeline": {
+        "per_hour_rate": 9.0
+      }
+    },
+    {
+      "session": "s2",
+      "timeline": {
+        "per_hour_rate": 8.0
+      }
+    },
+    {
+      "session": "s3",
+      "timeline": {
+        "per_hour_rate": 7.5
+      }
+    },
+    {
+      "session": "s4",
+      "timeline": {
+        "per_hour_rate": 6.0
+      }
+    },
+    {
+      "session": "s5",
+      "timeline": {
+        "per_hour_rate": 5.5
+      }
+    }
+  ],
+  "trend": {
+    "direction": "improving",
+    "today_rate": 2.0,
+    "baseline_rate": 7.2,
+    "n": 5,
+    "pct_change": -72.2,
+    "line_en": "Fewer bad-posture events this time: 2.0/h vs a 7.2/h average over your last 5 sessions.",
+    "line_ko": "이번에 나쁜 자세가 더 줄었어요: 시간당 2.0회 (최근 5회 평균 7.2회)."
+  }
+}

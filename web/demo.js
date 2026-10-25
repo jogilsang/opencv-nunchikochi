@@ -93,7 +93,15 @@ export class DemoApi {
 
   async getSummary() {
     if (!this._data) await this.load();
-    return { summary: clone(this._data.end && this._data.end.summary) || null, previous: clone(this._data.previous) || null };
+    return {
+      summary: clone(this._data.end && this._data.end.summary) || null,
+      previous: clone(this._data.previous) || null,
+      // history: oldest-first serialised summaries carrying timeline.per_hour_rate (real
+      // contract, GET /v1/summary). demo history is sample data — the UI labels it "Example
+      // data" so a judge never mistakes playback trend for a real measurement (honesty).
+      history: clone(this._data.history) || null,
+      example: !!this._data.example,
+    };
   }
 
   // Playback is "done" only in one-shot mode once every recorded step has been served at

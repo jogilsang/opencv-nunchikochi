@@ -10,7 +10,7 @@ It's 2:40 PM and Mina has been heads-down for two hours — her head drifting to
 
 ## Try it in one minute
 
-Open **https://dhys8dgxlvbgx.cloudfront.net/?demo=1** — no camera, no key, no sign-up. A short recorded session plays (a 60–90 s window; "Skip to report" ends it). Watch three things: the **overlay** (detected landmarks/behaviours), the **posture buddy** (head angle + distance avatar), and the **agent activity panel** (each frame's nudge / confirm / look-again / silent decision). **Live** mode uses your webcam and needs an access key supplied with the submission note — everything core is visible in demo mode without it.
+Open **https://dhys8dgxlvbgx.cloudfront.net/?demo=1** — no camera, no key, no sign-up. A short recorded session plays (a 60–90 s window; "Skip to report" ends it). Watch three things: the **overlay** (detected landmarks/behaviours), the **posture buddy** (head angle + distance avatar), and the **agent activity panel** (each frame's nudge / confirm / look-again / silent decision) with **quiet mode on by default** — posture is still recorded, alerts are held and counted. The **report** shows your bad-posture record per 5 / 10 / 30 / 60 min plus an hour-rate, and compares today with your recent sessions on a repeat visit. **Live** mode uses your webcam and needs an access key supplied with the submission note — everything core is visible in demo mode without it.
 
 ## The number that is the product
 
@@ -38,7 +38,7 @@ uv run --group service --group dev pytest \
 
 ## What is agentic here
 
-The vision result changes what the agent plans, which tools it calls, and when it asks a human. When quality is poor or confidence is borderline, the agent calls `second_look` (re-analyses the same in-memory frame with `enhance`, `zoom_face` or `strict`) *before* bothering anyone; a human "no" raises that behaviour's threshold and it persists. An optional Bedrock planner (Claude Haiku) can only propose; whitelist, no-diagnosis and length guardrails plus a timeout fall back to rules.
+The vision result changes what the agent plans, which tools it calls, and when it asks a human. When quality is poor or confidence is borderline, the agent calls `second_look` (re-analyses the same in-memory frame with `enhance`, `zoom_face` or `strict`) *before* bothering anyone; a human "no" raises that behaviour's threshold and it persists. An optional Bedrock planner (Claude Haiku) can only propose; whitelist, no-diagnosis and length guardrails plus a timeout fall back to rules. The agent is **quiet by default**: nudges for the same posture are capped (≈20-min cooldown, ≤3/hour), confirm toasts ≤2/hour and never the same kind twice in a row, and a brief quality blip waits out a 30-s debounce — held alerts are counted in the report, not dropped ([`ALERT_CALMING.md`](docs/eval/ALERT_CALMING.md)).
 
 ![Agent workflow](docs/diagrams/agent_workflow_compact.png)
 
@@ -72,18 +72,18 @@ The live review deployment is kept until 2026-11-10: see [`docs/cloud/ENDPOINT.m
 
 | Status | What |
 |---|---|
-| **Built & measured** | 286 tests pass (`uv run pytest tests -q`); web e2e 60/60 + buddy unit 6/6, axe WCAG 2 A/AA 0 hard violations; engine analysis **~178–282 ms/frame** on real Graviton (stable ~178 ms within one warm host), cold Init ~2.5 s; frame non-storage proven by 5 counterexample tests. ([`LATENCY.md`](docs/cloud/LATENCY.md), [`LATENCY_REGRESSION.md`](docs/eval/LATENCY_REGRESSION.md), [`WEB_E2E.md`](docs/eval/WEB_E2E.md)) |
-| **Synthetic baseline** | Vision robustness is from public samples + synthetic transforms, **not** tuned on and **not** accuracy; head-pose error ~3–5° yaw/pitch, ~2–3° roll under jitter. ([`VISION_EVAL.md`](docs/eval/VISION_EVAL.md), [`VISION_ROBUSTNESS.md`](docs/eval/VISION_ROBUSTNESS.md)) |
-| **Not measured** | Per-behaviour accuracy on real recorded clips; `drink` validation on real clips; the buddy's neck/torso/shoulders are **estimated** from head+hand, not measured body pose. ([`BODY_POSE_FEASIBILITY.md`](docs/eval/BODY_POSE_FEASIBILITY.md)) |
+| **Built & measured** | 320 tests pass (`uv run pytest -q`); web e2e 87/87 + buddy unit 6/6, axe WCAG 2 A/AA 0 hard violations; engine analysis **~178–282 ms/frame** on real Graviton (stable ~178 ms within one warm host), cold Init ~2.5 s; frame non-storage proven by 5 counterexample tests. A synthetic 1-hour session shows calming cut interruptions **9 → 5** (first alert unchanged; first repeat nudge ~10 min later). ([`LATENCY.md`](docs/cloud/LATENCY.md), [`WEB_E2E.md`](docs/eval/WEB_E2E.md), [`ALERT_CALMING.md`](docs/eval/ALERT_CALMING.md)) |
+| **Synthetic baseline** | Vision robustness is from public samples + synthetic transforms, **not** tuned on and **not** accuracy; head-pose error ~3–5° yaw/pitch, ~2–3° roll under jitter. A synthetic-geometry test rejects the typing/chin-rest `drink` false-positive paths (vertical + rise gate), not real-clip accuracy. ([`VISION_EVAL.md`](docs/eval/VISION_EVAL.md), [`DRINK_FEASIBILITY.md`](docs/eval/DRINK_FEASIBILITY.md)) |
+| **Not measured** | Per-behaviour accuracy on real recorded clips; `drink` is a hand-position estimate (palm near mouth) so real-clip false/missed detections are unmeasured; the buddy's neck/torso/shoulders are **estimated** from head+hand, not measured body pose. ([`BODY_POSE_FEASIBILITY.md`](docs/eval/BODY_POSE_FEASIBILITY.md)) |
 | **On hold** | Best Use of COOL (COOL is an AWS Marketplace AMI; this service is a Lambda zip). |
 
-Blink is undercounted at ~2 fps, so we report an eyes-closed fraction and only claim sustained closure. The posture buddy tracks **relative change from the calibrated pose, not absolute angles** (approximate intrinsics/3D model); on-screen motion is amplified ~1.5× for readability. Agent evaluation uses deterministic stubs and scenarios written by us; failures are kept in the report.
+Blink is undercounted at ~2 fps, so we report an eyes-closed fraction and only claim sustained closure. The posture buddy tracks **relative change from the calibrated pose, not absolute angles** (approximate intrinsics/3D model); on-screen motion is amplified ~1.5× for readability. The multi-session comparison is keyed to an **anonymous per-browser id** — it does not follow you across browsers/devices, and a live non-"na" trend is proven only by a unit test. The alert-reduction figure is from a **synthetic** session, not real use. Agent evaluation uses deterministic stubs and scenarios written by us; failures are kept in the report.
 
 License: MIT (code). Third-party model weights keep their own licences, see `models/MANIFEST.json`.
 
 ## Responsible use
 
-Wellbeing coaching only: no medical diagnosis, no identification or recognition of people, no frame storage, no cross-user data. See the privacy page in the web app and `docs/report/TECHNICAL_REPORT.md` section 8.
+Wellbeing coaching only: no medical diagnosis, no identification or recognition of people, no frame storage. The only stored data is aggregate numbers (no images/landmarks), keyed to an anonymous per-browser id for the multi-session comparison — no login, no personal identifiers, and nothing shared between users. See the privacy page in the web app and `docs/report/TECHNICAL_REPORT.md` section 8.
 
 ## Documents
 

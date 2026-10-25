@@ -45,6 +45,87 @@ function overlay(rollDeg = 0, t = 0) {
   };
 }
 
+// Build a bad-posture timeline (W16, provisional A11 contract): forward_head + head_tilt
+// events bucketed into 5/10/30/60-minute slices with {start_s, events, seconds}, plus a
+// per-hour rate (null if the session is under 10 min). Numbers only — no frames.
+function buildTimeline(durationS, totalBadEvents, totalBadSeconds) {
+  const UNITS = { "5m": 300, "10m": 600, "30m": 1800, "60m": 3600 };
+  const out = {};
+  for (const [key, step] of Object.entries(UNITS)) {
+    const slices = Math.max(1, Math.ceil(durationS / step));
+    // Front-loaded weights (more bad posture early, settling later) so the chart tells a
+    // small, realistic "started rough, improved" story instead of a flat line. Deterministic.
+    const weights = [];
+    for (let i = 0; i < slices; i++) weights.push(slices - i);
+    const wsum = weights.reduce((a, b) => a + b, 0) || 1;
+    const arr = [];
+    let allocated = 0;
+    for (let i = 0; i < slices; i++) {
+      const last = i === slices - 1;
+      const events = last ? Math.max(0, totalBadEvents - allocated) : Math.round(totalBadEvents * (weights[i] / wsum));
+      allocated += events;
+      const secFrac = weights[i] / wsum;
+      arr.push({ start_s: i * step, events, seconds: Math.round(totalBadSeconds * secFrac * 10) / 10 });
+    }
+    out[key] = arr;
+  }
+  const per_hour_rate = durationS >= 600 ? Math.round((totalBadEvents / (durationS / 3600)) * 10) / 10 : null;
+  return { bad_posture: out, per_hour_rate };
+}
+
+function badTotals(summary) {
+  const c = summary.counts || {};
+  const s = summary.seconds || {};
+  const events = (c.forward_head || 0) + (c.head_tilt || 0);
+  const seconds = (s.forward_head || 0) + (s.head_tilt || 0);
+  return { events, seconds };
+}
+
+// Real-contract bad-posture trend (W17, mirrors nunchi.agent.summary._trend): compares
+// today's per-hour rate to the mean of up to 5 prior sessions. Lower = better. Returns the
+// same dict the server puts on `report.trend`: direction + today_rate/baseline_rate/n + EN/KO
+// line. `history` is oldest-first serialised summaries carrying timeline.per_hour_rate.
+function mockTrend(todayRate, history) {
+  const prior = (history || [])
+    .map((h) => (h && h.timeline && typeof h.timeline.per_hour_rate === "number") ? h.timeline.per_hour_rate : null)
+    .filter((r) => r != null).slice(0, 5);
+  if (todayRate == null || prior.length === 0) {
+    return { direction: "na", today_rate: todayRate ?? null, baseline_rate: null, n: prior.length,
+      line_en: "No earlier sessions to compare with yet.", line_ko: "아직 비교할 이전 기록이 없어요." };
+  }
+  const baseline = Math.round((prior.reduce((a, b) => a + b, 0) / prior.length) * 100) / 100;
+  const pct = baseline === 0 ? null : Math.round(((todayRate - baseline) / baseline) * 1000) / 10;
+  let direction = "same";
+  if (pct != null && Math.abs(pct) <= 10) direction = "same";
+  else if (todayRate < baseline) direction = "improving";
+  else if (todayRate > baseline) direction = "worsening";
+  const n = prior.length;
+  let line_en, line_ko;
+  if (direction === "improving") {
+    line_en = `Fewer bad-posture events this time: ${todayRate}/h vs a ${baseline}/h average over your last ${n} sessions.`;
+    line_ko = `이번에 나쁜 자세가 더 줄었어요: 시간당 ${todayRate}회 (최근 ${n}회 평균 ${baseline}회).`;
+  } else if (direction === "worsening") {
+    line_en = `More bad-posture events this time: ${todayRate}/h vs a ${baseline}/h average over your last ${n} sessions.`;
+    line_ko = `이번엔 나쁜 자세가 더 늘었어요: 시간당 ${todayRate}회 (최근 ${n}회 평균 ${baseline}회).`;
+  } else {
+    line_en = `About the same as before: ${todayRate}/h vs a ${baseline}/h average over your last ${n} sessions.`;
+    line_ko = `이전과 비슷해요: 시간당 ${todayRate}회 (최근 ${n}회 평균 ${baseline}회).`;
+  }
+  return { direction, today_rate: todayRate, baseline_rate: baseline, n, pct_change: pct, line_en, line_ko };
+}
+
+// Build an oldest-first history of serialised summaries (each carries timeline.per_hour_rate +
+// date), matching GET /v1/summary `history`. Improving: earlier rates higher than `todayRate`.
+function mockHistory(todayRate) {
+  const base = typeof todayRate === "number" ? todayRate : 6.0;
+  const priorRates = [base + 5.4, base + 3.4, base + 1.4]; // 3 earlier sessions, descending to today
+  return priorRates.map((r, i) => {
+    const d = new Date(Date.now() - (priorRates.length - i) * 86400000).toISOString().slice(0, 10);
+    return { session_id: `mock-prev-${i}`, date: d, duration_s: 1500, counts: {}, seconds: {},
+      timeline: { bad_posture: {}, per_hour_rate: Math.round(r * 10) / 10 } };
+  });
+}
+
 export class MockApi {
   constructor() {
     this._frame = 0;
@@ -192,18 +273,26 @@ export class MockApi {
       longest_s: { forward_head: 95.0 },
       nudges_sent: 1, nudges_suppressed: 2, confirmations_asked: 1, recalibrations: 1,
     };
+    const bt = badTotals(summary);
+    summary.timeline = buildTimeline(summary.duration_s, bt.events, bt.seconds);
     this._lastSummary = summary;
+    const todayRate = summary.timeline.per_hour_rate;
+    const history = mockHistory(todayRate); // oldest-first prior sessions
     return {
       summary,
       report: {
         text_en: "A steady session. Your posture held well overall, with one longer forward-head stretch near the middle — a short break there would help. Blink rate looked healthy.",
         text_ko: "전반적으로 안정적인 세션이었어요. 중반에 거북목이 한 번 길어졌는데, 그때 잠깐 쉬어 주면 좋아요. 깜빡임 빈도는 건강한 편이었습니다.",
         highlights: ["posture mostly neutral", "one long forward-head stretch", "healthy blink rate"],
+        // W17: real contract — the server attaches the multi-session trend here on /end.
+        trend: mockTrend(todayRate, history),
       },
     };
   }
 
-  // GET /v1/summary — today's summary + a fabricated "yesterday" so the comparison UI has data.
+  // GET /v1/summary — today's summary + previous + recent history (oldest-first, ≤5),
+  // matching CONTRACTS §3. Each history item is a serialised summary carrying
+  // timeline.per_hour_rate + date. Numbers only.
   async getSummary() {
     await delay(80);
     const summary = this._lastSummary || {
@@ -211,6 +300,7 @@ export class MockApi {
       counts: { forward_head: 2 }, seconds: { forward_head: 180.0 }, longest_s: { forward_head: 95.0 },
       nudges_sent: 1, nudges_suppressed: 2, confirmations_asked: 1, recalibrations: 1,
     };
+    if (!summary.timeline) { const b = badTotals(summary); summary.timeline = buildTimeline(summary.duration_s || 0, b.events, b.seconds); }
     const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
     const previous = {
       session_id: "mock-prev", date: yesterday, duration_s: 1260,
@@ -219,7 +309,10 @@ export class MockApi {
       longest_s: { forward_head: 130.0 },
       nudges_sent: 3, nudges_suppressed: 1, confirmations_asked: 0, recalibrations: 2,
     };
-    return { summary, previous };
+    const pbt = badTotals(previous);
+    previous.timeline = buildTimeline(previous.duration_s, pbt.events, pbt.seconds);
+    const history = mockHistory(summary.timeline && summary.timeline.per_hour_rate);
+    return { summary, previous, history };
   }
 }
 
